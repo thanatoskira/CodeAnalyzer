@@ -117,7 +117,6 @@ public class DependencyUtil {
                 fileList.addAll(pkgNameFileMap.get(pkgName));
             }
         });
-        System.out.println(fileList);
         return fileList.toArray(new String[0]);
     }
 
