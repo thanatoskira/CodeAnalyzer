@@ -100,6 +100,9 @@ public class DependencyUtil {
      * 根据 pkgName 获取所在的文件，应返回最长匹配结果
      */
     public static String[] getFileByPkgName(String owner) {
+        if( pkgNameFileMap.isEmpty()){
+            throw new UnsupportedOperationException("pkgNameFileMap is empty");
+        }
         AtomicInteger maxLen = new AtomicInteger();
         List<String> fileList = new ArrayList<>();
         pkgNameFileMap.entrySet().stream().filter(
