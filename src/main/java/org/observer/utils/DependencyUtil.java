@@ -7,6 +7,8 @@ import org.codehaus.plexus.util.xml.pull.XmlPullParserException;
 
 import java.io.File;
 import java.io.IOException;
+import java.nio.file.Files;
+import java.nio.file.Paths;
 import java.util.*;
 import java.util.concurrent.atomic.AtomicInteger;
 import java.util.jar.JarFile;
@@ -18,10 +20,20 @@ public class DependencyUtil {
     /**
      * 建立 Jar 包与依赖间的映射
      */
-    private static Map<String, List<String>> fileDependencyMap = new HashMap();
-    private static Map<String, List<String>> pkgNameFileMap = new HashMap();
-    private static MavenXpp3Reader reader = new MavenXpp3Reader();
-    private static int minCommonPrefixLen = 2;
+    private final static Map<String, List<String>> fileDependencyMap = new HashMap<>();
+    private final static Map<String, List<String>> pkgNameFileMap = new HashMap<>();
+    private final static MavenXpp3Reader reader = new MavenXpp3Reader();
+    private final static int minCommonPrefixLen = 2;
+
+    public static void resolveDir(String dir) throws Exception {
+        Files.walk(Paths.get(dir)).filter(f -> f.toFile().getName().endsWith(".jar")).forEach(f -> {
+            try {
+                resolve(f.toString());
+            } catch (Exception e) {
+                throw new RuntimeException(e);
+            }
+        });
+    }
 
     public static void resolve(String file) throws Exception {
         JarFile jarFile = new JarFile(new File(file));
@@ -29,7 +41,7 @@ public class DependencyUtil {
         jarFile.stream().filter(f -> {
             String name = f.getName();
             return name.startsWith("META-INF") && name.endsWith("pom.xml");
-        }).findFirst().stream().forEach(xml -> {
+        }).findFirst().ifPresent(xml -> {
             try {
                 Model model = reader.read(jarFile.getInputStream(xml));
                 String groupId = model.getGroupId() == null ? model.getParent().getGroupId() : model.getGroupId();
@@ -52,7 +64,7 @@ public class DependencyUtil {
                     jarFile.stream().filter(f -> {
                         String name = f.getName().replace("/", ".");
                         return name.endsWith(".class") &&
-                                !groups.stream().anyMatch(group -> name.startsWith(group)) &&
+                                groups.stream().noneMatch(name::startsWith) &&
                                 new File(f.getName()).getParentFile() != null;
                     }).forEach(f -> {
                         String path = new File(f.getName()).getParentFile().getPath().replace("/", ".");
@@ -64,7 +76,7 @@ public class DependencyUtil {
                                 return prefix;
                             }
                             return null;
-                        }).filter(s -> s != null).findFirst();
+                        }).filter(Objects::nonNull).findFirst();
                         if (result.isPresent()) {
                             groups.removeAll(groups.stream().filter(group -> group.startsWith(result.get())).toList());
                             groups.add(result.get());
@@ -72,7 +84,7 @@ public class DependencyUtil {
                             groups.add(path);
                         }
                     });
-                    groups.stream().forEach(pkgName -> addPkgFileMap(pkgName.replace("/", "."), file));
+                    groups.forEach(pkgName -> addPkgFileMap(pkgName.replace("/", "."), file));
                 } else {
                     addPkgFileMap(packageName, file);
                 }
@@ -96,10 +108,10 @@ public class DependencyUtil {
             String pkgName = entry.getKey();
             if (pkgName.length() > maxLen.get()) {
                 fileList.clear();
-                fileList.add(pkgName);
+                fileList.addAll(pkgNameFileMap.get(pkgName));
                 maxLen.set(pkgName.length());
             } else if (pkgName.length() == maxLen.get()) {
-                fileList.add(pkgName);
+                fileList.addAll(pkgNameFileMap.get(pkgName));
             }
         });
         System.out.println(fileList);
@@ -107,11 +119,7 @@ public class DependencyUtil {
     }
 
     private static void addPkgFileMap(String pkgName, String file) {
-        List<String> list = pkgNameFileMap.get(pkgName);
-        if (list == null) {
-            list = new ArrayList<>();
-            pkgNameFileMap.put(pkgName, list);
-        }
+        List<String> list = pkgNameFileMap.computeIfAbsent(pkgName, k -> new ArrayList<>());
         list.add(file);
     }
 
