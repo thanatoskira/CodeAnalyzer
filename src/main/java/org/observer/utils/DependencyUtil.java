@@ -11,6 +11,7 @@ import java.nio.file.Files;
 import java.nio.file.Paths;
 import java.util.*;
 import java.util.concurrent.atomic.AtomicInteger;
+import java.util.concurrent.atomic.AtomicReference;
 import java.util.jar.JarFile;
 
 /**
@@ -35,9 +36,13 @@ public class DependencyUtil {
         });
     }
 
+    /**
+     * 通过 pom.xml 建立 packageName -> dependencies 和 packageName -> files 映射
+     */
     public static void resolve(String file) throws Exception {
         JarFile jarFile = new JarFile(new File(file));
 
+        AtomicReference<String> packageName = new AtomicReference<>(null);
         jarFile.stream().filter(f -> {
             String name = f.getName();
             return name.startsWith("META-INF") && name.endsWith("pom.xml");
@@ -45,48 +50,11 @@ public class DependencyUtil {
             try {
                 Model model = reader.read(jarFile.getInputStream(xml));
                 String groupId = model.getGroupId() == null ? model.getParent().getGroupId() : model.getGroupId();
-                String packageName = String.format("%s.%s", groupId, model.getArtifactId());
-                /**
-                 * 1 .存在 groupId.artifactId 与 packageName 不一致的情况(已解决)
-                 * eg: cglib-3.2.12.jar: cglib.cglib -> net.sf.cglib
-                 * 2. 存在 jar 包含多个 packageName 的情况(已解决)
-                 * eg: atlassian-plugins-core-5.7.14.jar -> org/codehaus/classworlds/uberjar/protocol/jar/ 和 com/atlassian/plugin/
-                 * 3. 存在多个 jar 包存在相同 packageName 的情况(已解决)
-                 * eg: org.apache.lucene -> lucene-core-4.4.0-atlassian-6.jar / lucene-misc-4.4.0-atlassian-6.jar
-                 * 4. 存在 org/ org/apache/felix org/osgi/ 目录分组错误情况(已解决)
-                 * right：[org/apache/felix, org/osgi/]
-                 * error：[org/]
-                 * 5. 存在不包含目录的 Class 文件(已解决)
-                 * eg: module-info.class
-                 */
-                if (jarFile.getJarEntry(packageName.replace(".", "/")) == null) {
-                    List<String> groups = new ArrayList<>();
-                    jarFile.stream().filter(f -> {
-                        String name = f.getName().replace("/", ".");
-                        return name.endsWith(".class") &&
-                                groups.stream().noneMatch(name::startsWith) &&
-                                new File(f.getName()).getParentFile() != null;
-                    }).forEach(f -> {
-                        String path = new File(f.getName()).getParentFile().getPath().replace("/", ".");
-                        Optional<String> result = groups.stream().map(group -> {
-                            String prefix = StringUtils.getCommonPrefix(group, path);
-                            if (prefix == null) {
-                                return path;
-                            } else if (prefix.split("\\.").length > minCommonPrefixLen) {
-                                return prefix;
-                            }
-                            return null;
-                        }).filter(Objects::nonNull).findFirst();
-                        if (result.isPresent()) {
-                            groups.removeAll(groups.stream().filter(group -> group.startsWith(result.get())).toList());
-                            groups.add(result.get());
-                        } else {
-                            groups.add(path);
-                        }
-                    });
-                    groups.forEach(pkgName -> addPkgFileMap(pkgName.replace("/", "."), file));
+                packageName.set(String.format("%s.%s", groupId, model.getArtifactId()));
+                if (jarFile.getJarEntry(packageName.get().replace(".", "/")) == null) {
+                    packageName.set(null);
                 } else {
-                    addPkgFileMap(packageName, file);
+                    addPkgFileMap(packageName.get(), file);
                 }
                 List<String> depList = model.getDependencies().stream().map(dep -> String.format("%s.%s", dep.getGroupId().equals("${project.groupId}") ? groupId : dep.getGroupId(), dep.getArtifactId())).toList();
                 fileDependencyMap.put(file, depList);
@@ -94,6 +62,48 @@ public class DependencyUtil {
                 throw new RuntimeException(e);
             }
         });
+
+        /**
+         * 1 .存在 groupId.artifactId 与 packageName 不一致的情况(已解决)
+         * eg: cglib-3.2.12.jar: cglib.cglib -> net.sf.cglib
+         * 2. 存在 jar 包含多个 packageName 的情况(已解决)
+         * eg: atlassian-plugins-core-5.7.14.jar -> org/codehaus/classworlds/uberjar/protocol/jar/ 和 com/atlassian/plugin/
+         * 3. 存在多个 jar 包存在相同 packageName 的情况(已解决)
+         * eg: org.apache.lucene -> lucene-core-4.4.0-atlassian-6.jar / lucene-misc-4.4.0-atlassian-6.jar
+         * 4. 存在 org/ org/apache/felix org/osgi/ 目录分组错误情况(已解决)
+         * right：[org/apache/felix, org/osgi/]
+         * error：[org/]
+         * 5. 存在不包含目录的 Class 文件(已解决)
+         * eg: module-info.class
+         * 6. 存在 jar 中不包含 pom.xml 文件的情况
+         */
+        if(packageName.get() == null){
+            List<String> groups = new ArrayList<>();
+            jarFile.stream().filter(f -> {
+                String name = f.getName().replace("/", ".");
+                return name.endsWith(".class") &&
+                        groups.stream().noneMatch(name::startsWith) &&
+                        new File(f.getName()).getParentFile() != null;
+            }).forEach(f -> {
+                String path = new File(f.getName()).getParentFile().getPath().replace("/", ".");
+                Optional<String> result = groups.stream().map(group -> {
+                    String prefix = StringUtils.getCommonPrefix(group, path);
+                    if (prefix == null) {
+                        return path;
+                    } else if (prefix.split("\\.").length > minCommonPrefixLen) {
+                        return prefix;
+                    }
+                    return null;
+                }).filter(Objects::nonNull).findFirst();
+                if (result.isPresent()) {
+                    groups.removeAll(groups.stream().filter(group -> group.startsWith(result.get())).toList());
+                    groups.add(result.get());
+                } else {
+                    groups.add(path);
+                }
+            });
+            groups.forEach(pkgName -> addPkgFileMap(pkgName.replace("/", "."), file));
+        }
     }
 
     /**
