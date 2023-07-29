@@ -1,5 +1,7 @@
 package org.observer.utils;
 
+import net.jodah.expiringmap.ExpirationPolicy;
+import net.jodah.expiringmap.ExpiringMap;
 import org.apache.commons.lang3.StringUtils;
 import org.apache.maven.model.Model;
 import org.apache.maven.model.io.xpp3.MavenXpp3Reader;
@@ -10,6 +12,8 @@ import java.io.IOException;
 import java.nio.file.Files;
 import java.nio.file.Paths;
 import java.util.*;
+import java.util.concurrent.CopyOnWriteArrayList;
+import java.util.concurrent.TimeUnit;
 import java.util.concurrent.atomic.AtomicInteger;
 import java.util.concurrent.atomic.AtomicReference;
 import java.util.jar.JarFile;
@@ -23,6 +27,18 @@ public class DependencyUtil {
      */
     private final static Map<String, List<String>> fileDependencyMap = new HashMap<>();
     private final static Map<String, List<String>> pkgNameFileMap = new HashMap<>();
+    /**
+     * 记录无法加载的类
+     */
+    private final static List<String> unKnownClassNameList = new CopyOnWriteArrayList<>();
+    /**
+     * 缓存 class -> file 映射
+     */
+    private final static Map<String, String> clsNameFileMap = ExpiringMap.builder()
+            // 过期时间
+            .expiration(5, TimeUnit.MINUTES)
+            // 过期策略
+            .expirationPolicy(ExpirationPolicy.ACCESSED).build();
     private final static MavenXpp3Reader reader = new MavenXpp3Reader();
     private final static int minCommonPrefixLen = 2;
 
@@ -77,7 +93,7 @@ public class DependencyUtil {
          * eg: module-info.class
          * 6. 存在 jar 中不包含 pom.xml 文件的情况
          */
-        if(packageName.get() == null){
+        if (packageName.get() == null) {
             List<String> groups = new ArrayList<>();
             jarFile.stream().filter(f -> {
                 String name = f.getName().replace("/", ".");
@@ -110,7 +126,7 @@ public class DependencyUtil {
      * 根据 pkgName 获取所在的文件，应返回最长匹配结果
      */
     public static String[] getFileByPkgName(String owner) {
-        if( pkgNameFileMap.isEmpty()){
+        if (pkgNameFileMap.isEmpty()) {
             throw new UnsupportedOperationException("pkgNameFileMap is empty");
         }
         AtomicInteger maxLen = new AtomicInteger();
@@ -128,6 +144,52 @@ public class DependencyUtil {
             }
         });
         return fileList.toArray(new String[0]);
+    }
+
+    /**
+     * 获取类所在的 Jar 包文件路径
+     *
+     * @param cName 查询的类名: a.b.c
+     * @return jar 包文件路径 or null
+     */
+    public static String getFilePathByFullQualifiedName(String cName) {
+        if (pkgNameFileMap.isEmpty()) {
+            throw new UnsupportedOperationException("pkgNameFileMap is empty");
+        }
+        if (unKnownClassNameList.contains(cName)) {
+            return null;
+        }
+        /**
+         * 使用 pkgName 代替 className 减少搜索次数
+         * 例外：两个 jar 包 x, y 同时存在 a.b.c pkgName，但是类只存在于 y 中，可能先缓存了 a.b.c -> x
+         * 将可能导致通过 clsNameFileMap 返回的 jar 包并不包含该 类 的情况，可能比较特例暂不解决
+         */
+        String pkgName = cName.substring(0, cName.lastIndexOf("."));
+        String filePath = clsNameFileMap.get(pkgName);
+        if (filePath == null) {
+            Optional<String> result = pkgNameFileMap.entrySet().stream().filter(
+                    entry -> cName.startsWith(entry.getKey())
+            ).map(entry -> {
+                Optional<String> found = entry.getValue().stream().filter(dir -> {
+                    try {
+                        return new JarFile(dir).stream().anyMatch(f -> {
+                            String name = f.getName();
+                            return name.endsWith(".class") && name.substring(0, name.lastIndexOf(".class")).replace("/", ".").equals(cName);
+                        });
+                    } catch (IOException e) {
+                        throw new RuntimeException(e);
+                    }
+                }).findFirst();
+                return found.orElse(null);
+            }).filter(Objects::nonNull).findFirst();
+            if (result.isPresent()) {
+                filePath = result.get();
+                clsNameFileMap.put(pkgName, filePath);
+            } else {
+                unKnownClassNameList.add(cName);
+            }
+        }
+        return filePath;
     }
 
     private static void addPkgFileMap(String pkgName, String file) {
