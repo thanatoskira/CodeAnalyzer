@@ -169,19 +169,17 @@ public class DependencyUtil {
         if (filePath == null) {
             Optional<String> result = pkgNameFileMap.entrySet().stream().filter(
                     entry -> cName.startsWith(entry.getKey())
-            ).map(entry -> {
-                Optional<String> found = entry.getValue().stream().filter(dir -> {
-                    try {
-                        return new JarFile(dir).stream().anyMatch(f -> {
-                            String name = f.getName();
-                            return name.endsWith(".class") && name.substring(0, name.lastIndexOf(".class")).replace("/", ".").equals(cName);
-                        });
-                    } catch (IOException e) {
-                        throw new RuntimeException(e);
-                    }
-                }).findFirst();
-                return found.orElse(null);
-            }).filter(Objects::nonNull).findFirst();
+            ).map(entry -> entry.getValue().stream().filter(dir -> {
+                        try {
+                            return new JarFile(dir).stream().anyMatch(f -> {
+                                String name = f.getName();
+                                return name.endsWith(".class") && name.substring(0, name.lastIndexOf(".class")).replace("/", ".").equals(cName);
+                            });
+                        } catch (IOException e) {
+                            throw new RuntimeException(e);
+                        }
+                    }).findFirst().orElse(null)
+            ).filter(Objects::nonNull).findFirst();
             if (result.isPresent()) {
                 filePath = result.get();
                 clsNameFileMap.put(pkgName, filePath);
