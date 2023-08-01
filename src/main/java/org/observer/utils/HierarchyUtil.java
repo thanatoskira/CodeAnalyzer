@@ -29,9 +29,9 @@ public class HierarchyUtil {
         // 寻找接口方法
         Set<String> ifaces = getAllInterfaces(cName);
         String result;
-        result = ifaces.stream().filter(iface -> {
+        result = ifaces.stream().map(iface -> iface.replace("/", ".")).filter(iface -> {
             try {
-                ClassNode ifaceNode = ClassNodeUtil.getClassNodeByClassName(iface.replace("/", "."));
+                ClassNode ifaceNode = ClassNodeUtil.getClassNodeByClassName(iface);
                 // 如果无法获取接口对应的 ClassNode 则跳过判断
                 return ifaceNode != null && ifaceNode.methods.stream().anyMatch(method -> method.name.equals(fName) && method.desc.equals(fDesc));
             } catch (Exception e) {
