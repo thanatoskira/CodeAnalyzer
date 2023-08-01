@@ -23,10 +23,17 @@ import java.util.jar.JarFile;
  */
 public class DependencyUtil {
     /**
-     * 建立当前 jar 包与依赖当前 jar 包文件的映射
+     * dependency(groupId.artifactId) -> file 映射
      */
     private final static Map<String, List<String>> dependencyFileMap = new HashMap<>();
+    /**
+     * packageName(和 groupId.artifactId 可能一致) -> file 映射
+     */
     private final static Map<String, List<String>> pkgNameFileMap = new HashMap<>();
+    /**
+     * groupId.artifactId -> file 映射
+     */
+    private final static Map<String, String> fileArtifactMap = new HashMap<>();
     /**
      * 记录无法加载的类
      */
@@ -70,6 +77,7 @@ public class DependencyUtil {
                 Model model = reader.read(jarFile.getInputStream(xml));
                 String groupId = model.getGroupId() == null ? model.getParent().getGroupId() : model.getGroupId();
                 packageName.set(String.format("%s.%s", groupId, model.getArtifactId()));
+                fileArtifactMap.put(file, packageName.get());
                 if (jarFile.getJarEntry(packageName.get().replace(".", "/")) == null) {
                     packageName.set(null);
                 } else {
@@ -201,11 +209,16 @@ public class DependencyUtil {
      */
     public static List<String> getAllDependencies(String cName) {
         if (dependencyFileMap.isEmpty()) {
-            throw new RuntimeException("fileDependencyMap is empty");
+            throw new RuntimeException("dependencyFileMap is empty");
         }
         List<String> result = new ArrayList<>();
-        result.add(DependencyUtil.getFilePathByFullQualifiedName(cName));
-        dependencyFileMap.entrySet().stream().filter(entry -> cName.startsWith(entry.getKey())).map(Map.Entry::getValue).forEach(result::addAll);
+        String file = DependencyUtil.getFilePathByFullQualifiedName(cName);
+        result.add(file);
+        /**
+         * 应使用 jar 的 groupId.artifactID 进行依赖搜索
+         */
+        String artifactName = fileArtifactMap.get(file);
+        dependencyFileMap.entrySet().stream().filter(entry -> artifactName.startsWith(entry.getKey())).map(Map.Entry::getValue).forEach(result::addAll);
         return result;
     }
 

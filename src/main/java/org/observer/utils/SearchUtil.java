@@ -57,13 +57,26 @@ public class SearchUtil {
             }).forEach(pCallers -> pCallers.forEach(pCaller -> {
                 try {
                     Map<String, List> element = new ConcurrentHashMap<>();
-//                    element.put(pCaller, new ArrayList());
-                    elements.add(element);
                     getBTCallerInner(pCaller, group, element, upgrade);
+                    if (!element.isEmpty()) {
+                        elements.add(element);
+                    }
                 } catch (Exception e) {
                     throw new RuntimeException(e);
                 }
             }));
+        }
+        /**
+         * 清除 upgrade 过程中添加的空 map
+         * eg:
+         * {
+         *   "com.opensymphony.webwork.views.xslt.XSLTResult#execute#(Lcom/opensymphony/xwork/ActionInvocation;)V#1": [
+         *     {}
+         *   ]
+         * }
+         */
+        if (finalRoot != root && finalRoot.isEmpty()) {
+            root.get(call).remove(finalRoot);
         }
     }
 
