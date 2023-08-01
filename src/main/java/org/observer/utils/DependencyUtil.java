@@ -23,9 +23,9 @@ import java.util.jar.JarFile;
  */
 public class DependencyUtil {
     /**
-     * 建立 Jar 包与依赖间的映射
+     * 建立当前 jar 包与依赖当前 jar 包文件的映射
      */
-    private final static Map<String, List<String>> fileDependencyMap = new HashMap<>();
+    private final static Map<String, List<String>> dependencyFileMap = new HashMap<>();
     private final static Map<String, List<String>> pkgNameFileMap = new HashMap<>();
     /**
      * 记录无法加载的类
@@ -43,6 +43,9 @@ public class DependencyUtil {
     private final static int minCommonPrefixLen = 2;
 
     public static void resolveDir(String dir) throws Exception {
+        if (!new File(dir).isDirectory()) {
+            throw new RuntimeException(String.format("%s must be dir", dir));
+        }
         Files.walk(Paths.get(dir)).filter(f -> f.toFile().getName().endsWith(".jar")).forEach(f -> {
             try {
                 resolve(f.toString());
@@ -73,7 +76,10 @@ public class DependencyUtil {
                     addPkgFileMap(packageName.get(), file);
                 }
                 List<String> depList = model.getDependencies().stream().map(dep -> String.format("%s.%s", dep.getGroupId().equals("${project.groupId}") ? groupId : dep.getGroupId(), dep.getArtifactId())).toList();
-                fileDependencyMap.put(file, depList);
+                depList.forEach(dep -> {
+                    List<String> files = dependencyFileMap.computeIfAbsent(dep, k -> new ArrayList<>());
+                    files.add(file);
+                });
             } catch (IOException | XmlPullParserException e) {
                 throw new RuntimeException(e);
             }
@@ -190,14 +196,27 @@ public class DependencyUtil {
         return filePath;
     }
 
+    /**
+     * 获取 cName 所在及依赖该 jar 包的文件
+     */
+    public static List<String> getAllDependencies(String cName) {
+        if (dependencyFileMap.isEmpty()) {
+            throw new RuntimeException("fileDependencyMap is empty");
+        }
+        List<String> result = new ArrayList<>();
+        result.add(DependencyUtil.getFilePathByFullQualifiedName(cName));
+        dependencyFileMap.entrySet().stream().filter(entry -> cName.startsWith(entry.getKey())).map(Map.Entry::getValue).forEach(result::addAll);
+        return result;
+    }
+
     private static void addPkgFileMap(String pkgName, String file) {
         List<String> list = pkgNameFileMap.computeIfAbsent(pkgName, k -> new ArrayList<>());
         list.add(file);
     }
 
 
-    public static Map<String, List<String>> getFileDependencyMap() {
-        return fileDependencyMap;
+    public static Map<String, List<String>> getDependencyFileMap() {
+        return dependencyFileMap;
     }
 
     public static Map<String, List<String>> getPkgNameFileMap() {
