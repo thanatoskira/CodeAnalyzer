@@ -174,12 +174,11 @@ public class DependencyUtil {
             return null;
         }
         /**
-         * 使用 pkgName 代替 className 减少搜索次数
+         * 不可采用 pkgName 代替 className 减少搜索次数
          * 例外：两个 jar 包 x, y 同时存在 a.b.c pkgName，但是类只存在于 y 中，可能先缓存了 a.b.c -> x
-         * 将可能导致通过 clsNameFileMap 返回的 jar 包并不包含该 类 的情况，可能比较特例暂不解决
+         * 将可能导致通过 clsNameFileMap 返回的 jar 包并不包含该 类 的情况
          */
-        String pkgName = cName.substring(0, cName.lastIndexOf("."));
-        String filePath = clsNameFileMap.get(pkgName);
+        String filePath = clsNameFileMap.get(cName);
         if (filePath == null) {
             Optional<String> result = pkgNameFileMap.entrySet().stream().filter(
                     entry -> cName.startsWith(entry.getKey())
@@ -196,7 +195,7 @@ public class DependencyUtil {
             ).filter(Objects::nonNull).findFirst();
             if (result.isPresent()) {
                 filePath = result.get();
-                clsNameFileMap.put(pkgName, filePath);
+                clsNameFileMap.put(cName, filePath);
             } else {
                 unKnownClassNameList.add(cName);
             }
