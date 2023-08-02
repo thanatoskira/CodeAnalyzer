@@ -78,7 +78,7 @@ public class ClassNodeUtil {
         JarFile jarFile = new JarFile(file);
         Map<String, ClassNode> classNodeMap = fileNodesMap.computeIfAbsent(file, k -> newExpiringMap());
         AtomicBoolean loaded = new AtomicBoolean(false);
-        jarFile.stream().filter(filter).forEach(entry -> {
+        jarFile.stream().filter(filter).filter(f -> !f.getName().contains("/test/")).forEach(entry -> {
             try {
                 InputStream stream = jarFile.getInputStream(entry);
                 ClassReader reader = new ClassReader(stream);
