@@ -92,7 +92,7 @@ public class SearchUtil {
         boolean isPrivate = (fAccess & Opcodes.ACC_PRIVATE) != 0;
         boolean isProtected = (fAccess & Opcodes.ACC_PROTECTED) != 0;
 
-        Map<String, ClassNode> nodeMap = ClassNodeUtil.getClassNodesByFileName(file);
+        Map<Object, ClassNode> nodeMap = ClassNodeUtil.getClassNodesByFileName(file);
         List<String> callerList = new ArrayList<>();
 
         // 未加载 file jar 包 或 private/proteced 方法所在文件与 file 不匹配

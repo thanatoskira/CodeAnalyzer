@@ -217,7 +217,7 @@ public class DependencyUtil {
          * 应使用 jar 的 groupId.artifactID 进行依赖搜索
          */
         String artifactName = fileArtifactMap.get(file);
-        if(artifactName != null){
+        if (artifactName != null) {
             dependencyFileMap.entrySet().stream().filter(entry -> artifactName.startsWith(entry.getKey())).map(Map.Entry::getValue).forEach(result::addAll);
         }
         return result;

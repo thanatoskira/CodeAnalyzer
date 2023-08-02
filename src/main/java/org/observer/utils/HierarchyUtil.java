@@ -8,6 +8,32 @@ import java.util.LinkedHashSet;
 import java.util.Set;
 
 public class HierarchyUtil {
+
+    /**
+     * 判断两个类是否存在公共的父类/接口
+     */
+    public static boolean hasCommonAncestor(String leftName, String rightName) {
+        if (leftName.equals(rightName)) {
+            return true;
+        } else {
+            try {
+                Set<String> leftSet = getAllSupers(leftName);
+                Set<String> rightSet = getAllSupers(rightName);
+                leftSet.retainAll(rightSet);
+                if (leftSet.isEmpty()) {
+                    leftSet = getAllInterfaces(leftName);
+                    rightSet = getAllInterfaces(rightName);
+                    leftSet.retainAll(rightSet);
+                    return !leftSet.isEmpty();
+                } else {
+                    return true;
+                }
+            } catch (Exception e) {
+                throw new RuntimeException(e);
+            }
+        }
+    }
+
     /**
      * 获取 cName#fName 对应的接口类名
      *

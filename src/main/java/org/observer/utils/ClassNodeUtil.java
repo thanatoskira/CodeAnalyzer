@@ -1,25 +1,25 @@
 package org.observer.utils;
 
+import com.github.benmanes.caffeine.cache.Caffeine;
 import jdk.internal.org.objectweb.asm.ClassReader;
 import jdk.internal.org.objectweb.asm.tree.ClassNode;
-import net.jodah.expiringmap.ExpirationPolicy;
-import net.jodah.expiringmap.ExpiringMap;
 
 import java.io.IOException;
 import java.io.InputStream;
 import java.nio.file.Files;
 import java.nio.file.Paths;
+import java.time.Duration;
 import java.util.List;
 import java.util.Map;
 import java.util.concurrent.ConcurrentHashMap;
-import java.util.concurrent.TimeUnit;
+import java.util.concurrent.ConcurrentMap;
 import java.util.concurrent.atomic.AtomicBoolean;
 import java.util.function.Predicate;
 import java.util.jar.JarFile;
 import java.util.zip.ZipEntry;
 
 public class ClassNodeUtil {
-    private final static Map<String, Map<String, ClassNode>> fileNodesMap = new ConcurrentHashMap<>();
+    private final static Map<String, Map<Object, ClassNode>> fileNodesMap = new ConcurrentHashMap<>();
 
     /**
      * ClassReader.SKIP_CODE: skip the Code attributes
@@ -76,7 +76,7 @@ public class ClassNodeUtil {
      */
     private static boolean loadClassNode(String file, Predicate<ZipEntry> filter) throws Exception {
         JarFile jarFile = new JarFile(file);
-        Map<String, ClassNode> classNodeMap = fileNodesMap.computeIfAbsent(file, k -> newExpiringMap());
+        Map<Object, ClassNode> classNodeMap = fileNodesMap.computeIfAbsent(file, k -> newExpiringMap());
         AtomicBoolean loaded = new AtomicBoolean(false);
         jarFile.stream().filter(filter).filter(f -> !f.getName().contains("/test/")).forEach(entry -> {
             try {
@@ -93,21 +93,10 @@ public class ClassNodeUtil {
         return loaded.get();
     }
 
-    private static Map<String, ClassNode> newExpiringMap() {
-        return ExpiringMap.builder()
-                // 过期时间
-                .expiration(5, TimeUnit.MINUTES)
-                // 过期策略
-                .expirationPolicy(ExpirationPolicy.ACCESSED)
-                // 延迟加载
-                .entryLoader(cName -> {
-                    try {
-                        return lazyLoadClassNodeByClassName(cName.toString());
-                    } catch (Exception e) {
-                        throw new RuntimeException(e);
-                    }
-                })
-                .build();
+    private static ConcurrentMap<Object, ClassNode> newExpiringMap() {
+        return Caffeine.newBuilder()
+                .expireAfterAccess(Duration.ofMinutes(5))
+                .build(cName -> lazyLoadClassNodeByClassName(cName.toString())).asMap();
     }
 
     public static ClassNode getClassNodeByClassName(String cName) throws Exception {
@@ -119,8 +108,8 @@ public class ClassNodeUtil {
         }
     }
 
-    public static Map<String, ClassNode> getClassNodesByFileName(String file) throws Exception {
-        Map<String, ClassNode> nodeMap = fileNodesMap.computeIfAbsent(file, k -> newExpiringMap());
+    public static Map<Object, ClassNode> getClassNodesByFileName(String file) throws Exception {
+        Map<Object, ClassNode> nodeMap = fileNodesMap.computeIfAbsent(file, k -> newExpiringMap());
         if (nodeMap.isEmpty()) {
             if (!loadAllClassNodeFromFile(file)) {
                 throw new RuntimeException(String.format("can not load jar: %s", file));
@@ -136,12 +125,12 @@ public class ClassNodeUtil {
      * @param cName   类名
      * @return ClassNode 列表
      */
-    public static List<ClassNode> getClassNodesByPkgName(Map<String, ClassNode> nodeMap, String cName) {
+    public static List<ClassNode> getClassNodesByPkgName(Map<Object, ClassNode> nodeMap, String cName) {
         String pkgName = cName.substring(0, cName.lastIndexOf("."));
         return nodeMap.values().stream().filter(node -> node.name.startsWith(pkgName)).toList();
     }
 
-    public static Map<String, Map<String, ClassNode>> getFileNodesMap() {
+    public static Map<String, Map<Object, ClassNode>> getFileNodesMap() {
         return fileNodesMap;
     }
 
