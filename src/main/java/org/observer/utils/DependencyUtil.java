@@ -1,7 +1,6 @@
 package org.observer.utils;
 
-import net.jodah.expiringmap.ExpirationPolicy;
-import net.jodah.expiringmap.ExpiringMap;
+import com.github.benmanes.caffeine.cache.Caffeine;
 import org.apache.commons.lang3.StringUtils;
 import org.apache.maven.model.Model;
 import org.apache.maven.model.io.xpp3.MavenXpp3Reader;
@@ -11,9 +10,9 @@ import java.io.File;
 import java.io.IOException;
 import java.nio.file.Files;
 import java.nio.file.Paths;
+import java.time.Duration;
 import java.util.*;
 import java.util.concurrent.CopyOnWriteArrayList;
-import java.util.concurrent.TimeUnit;
 import java.util.concurrent.atomic.AtomicInteger;
 import java.util.concurrent.atomic.AtomicReference;
 import java.util.jar.JarFile;
@@ -41,11 +40,9 @@ public class DependencyUtil {
     /**
      * 缓存 class -> file 映射
      */
-    private final static Map<String, String> clsNameFileMap = ExpiringMap.builder()
-            // 过期时间
-            .expiration(5, TimeUnit.MINUTES)
-            // 过期策略
-            .expirationPolicy(ExpirationPolicy.ACCESSED).build();
+    private final static Map<Object, Object> clsNameFileMap = Caffeine.newBuilder()
+            .expireAfterAccess(Duration.ofMinutes(5))
+            .build().asMap();
     private final static MavenXpp3Reader reader = new MavenXpp3Reader();
     private final static int minCommonPrefixLen = 2;
 
@@ -178,7 +175,7 @@ public class DependencyUtil {
          * 例外：两个 jar 包 x, y 同时存在 a.b.c pkgName，但是类只存在于 y 中，可能先缓存了 a.b.c -> x
          * 将可能导致通过 clsNameFileMap 返回的 jar 包并不包含该 类 的情况
          */
-        String filePath = clsNameFileMap.get(cName);
+        String filePath = (String) clsNameFileMap.get(cName);
         if (filePath == null) {
             Optional<String> result = pkgNameFileMap.entrySet().stream().filter(
                     entry -> cName.startsWith(entry.getKey())
