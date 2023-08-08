@@ -30,7 +30,7 @@ public class DependencyUtil {
      */
     private final static Map<String, List<String>> pkgNameFileMap = new HashMap<>();
     /**
-     * groupId.artifactId -> file 映射
+     * file -> groupId.artifactId 映射
      */
     private final static Map<String, String> fileArtifactMap = new HashMap<>();
     /**
@@ -209,13 +209,28 @@ public class DependencyUtil {
         }
         List<String> result = new ArrayList<>();
         String file = DependencyUtil.getFilePathByFullQualifiedName(cName);
+        if (file == null) {
+            try {
+                Class.forName(cName);
+                file = ClassNodeUtil.jdkFileName;
+            } catch (ClassNotFoundException e) {
+                throw new RuntimeException("can not get file by class name: " + cName);
+            }
+        }
         result.add(file);
-        /**
-         * 应使用 jar 的 groupId.artifactID 进行依赖搜索
-         */
-        String artifactName = fileArtifactMap.get(file);
-        if (artifactName != null) {
-            dependencyFileMap.entrySet().stream().filter(entry -> artifactName.startsWith(entry.getKey())).map(Map.Entry::getValue).forEach(result::addAll);
+        if (file.equals(ClassNodeUtil.jdkFileName)) {
+            /**
+             * 如果 cName 来自 JDK，则所有 jar 包应作为依赖进行返回
+             */
+            result.addAll(fileArtifactMap.keySet());
+        } else {
+            /**
+             * 应使用 jar 的 groupId.artifactID 进行依赖搜索
+             */
+            String artifactName = fileArtifactMap.get(file);
+            if (artifactName != null) {
+                dependencyFileMap.entrySet().stream().filter(entry -> artifactName.startsWith(entry.getKey())).map(Map.Entry::getValue).forEach(result::addAll);
+            }
         }
         return result;
     }
@@ -233,5 +248,4 @@ public class DependencyUtil {
     public static Map<String, List<String>> getPkgNameFileMap() {
         return pkgNameFileMap;
     }
-
 }
