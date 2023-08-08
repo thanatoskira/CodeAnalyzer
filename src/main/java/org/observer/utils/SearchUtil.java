@@ -113,8 +113,18 @@ public class SearchUtil {
         return callerList;
     }
 
+    /**
+     * 判断 classNode 中的 methods 是否包含对 cName.fName(fDesc) 的调用
+     *
+     * @param cName a.b.c
+     * @param fName xxx
+     * @param fDesc (Ljava/lang/String;)V or null
+     */
     private static List<String> getCallersFromClassNode(ClassNode classNode, String cName, String fName, String fDesc) {
-        return classNode.methods.stream().filter(methodNode -> !MethodUtil.isBlackMethod(methodNode) && (!methodNode.name.equals(fName) || !methodNode.desc.equals(fDesc))).filter(methodNode -> {
+        return classNode.methods.stream().filter(methodNode -> !MethodUtil.isBlackMethod(methodNode) &&
+                !classNode.name.replace("/", ".").equals(cName) || !methodNode.name.equals(fName) ||
+                (!fDesc.equals("null") && !methodNode.desc.equals(fDesc))
+        ).filter(methodNode -> {
             try {
                 return MethodUtil.isCaller(methodNode, cName, fName, fDesc);
             } catch (Exception e) {

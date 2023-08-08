@@ -19,7 +19,7 @@ public class MethodUtil {
             AbstractInsnNode inode = ins.get(i);
             if (inode.getType() == AbstractInsnNode.METHOD_INSN) {
                 MethodInsnNode miNode = (MethodInsnNode) inode;
-                if (miNode.name.equals(fName) && miNode.desc.equals(fDesc) && HierarchyUtil.hasCommonAncestor(miNode.owner.replace("/", "."), cName)) {
+                if (miNode.name.equals(fName) && (fDesc.equals("null") || miNode.desc.equals(fDesc)) && HierarchyUtil.hasCommonAncestor(miNode.owner.replace("/", "."), cName)) {
                     found = true;
                     break;
                 }

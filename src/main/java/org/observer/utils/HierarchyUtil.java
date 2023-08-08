@@ -45,7 +45,7 @@ public class HierarchyUtil {
     public static String getIfaceMethodClzName(String cName, String fName, String fDesc) throws Exception {
         ClassNode node = ClassNodeUtil.getClassNodeByClassName(cName);
         if (node == null) {
-            throw new RuntimeException("can not load class: " + cName);
+            node = ClassNodeUtil.getClassNodeFromJDK(cName);
         }
         // 如果当前为接口类，则直接返回
         if ((node.access & Opcodes.ACC_INTERFACE) != 0) {
@@ -58,8 +58,8 @@ public class HierarchyUtil {
         result = ifaces.stream().map(iface -> iface.replace("/", ".")).filter(iface -> {
             try {
                 ClassNode ifaceNode = ClassNodeUtil.getClassNodeByClassName(iface);
-                // 如果无法获取接口对应的 ClassNode 则跳过判断
-                return ifaceNode != null && ifaceNode.methods.stream().anyMatch(method -> method.name.equals(fName) && method.desc.equals(fDesc));
+                // 如果无法获取接口对应的 ClassNode 则跳过判断，fDesc 允许为 null 只判断方法名是否一致
+                return ifaceNode != null && ifaceNode.methods.stream().anyMatch(method -> method.name.equals(fName) && (fDesc.equals("null") || method.desc.equals(fDesc)));
             } catch (Exception e) {
                 throw new RuntimeException(e);
             }
