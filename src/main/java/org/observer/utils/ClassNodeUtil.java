@@ -6,8 +6,9 @@ import jdk.internal.org.objectweb.asm.tree.ClassNode;
 
 import java.io.IOException;
 import java.io.InputStream;
-import java.nio.file.Files;
-import java.nio.file.Paths;
+import java.net.URI;
+import java.nio.file.*;
+import java.nio.file.attribute.BasicFileAttributes;
 import java.time.Duration;
 import java.util.List;
 import java.util.Map;
@@ -19,6 +20,7 @@ import java.util.jar.JarFile;
 import java.util.zip.ZipEntry;
 
 public class ClassNodeUtil {
+    public final static String jdkFileName = "rt.jar";
     private final static Map<String, Map<Object, ClassNode>> fileNodesMap = new ConcurrentHashMap<>();
 
     /**
@@ -47,6 +49,49 @@ public class ClassNodeUtil {
      */
     public static boolean loadAllClassNodeFromFile(String file) throws Exception {
         return loadClassNode(file, f -> f.getName().endsWith(".class"));
+    }
+
+    public static ClassNode getClassNodeFromJDK(String cName) {
+        Map<Object, ClassNode> classNodeMap = fileNodesMap.computeIfAbsent(jdkFileName, k -> newExpiringMap());
+        ClassNode node = classNodeMap.get(cName);
+        if (node == null) {
+            try {
+                ClassReader reader = new ClassReader(cName);
+                node = new ClassNode();
+                reader.accept(node, flag);
+                classNodeMap.put(cName, node);
+            } catch (IOException e) {
+                throw new RuntimeException("can not load class: " + cName);
+            }
+        }
+        return node;
+    }
+
+    /**
+     * 加载 JDK 中的 Classes
+     */
+    public static boolean loadAllClassNodeFromJDK() throws Exception {
+        FileSystem fileSystem = FileSystems.getFileSystem(URI.create("jrt:/"));
+        PathMatcher matcher = fileSystem.getPathMatcher("glob:**/*.class");
+        Map<Object, ClassNode> classNodeMap = fileNodesMap.computeIfAbsent(jdkFileName, k -> newExpiringMap());
+        Files.walkFileTree(fileSystem.getPath("/modules"), new SimpleFileVisitor<>() {
+            @Override
+            public FileVisitResult visitFile(Path file, BasicFileAttributes attrs) throws IOException {
+                if (matcher.matches(file)) {
+                    ClassReader reader = new ClassReader(Files.newInputStream(file));
+                    ClassNode node = new ClassNode();
+                    reader.accept(node, flag);
+                    classNodeMap.put(node.name.replace("/", "."), node);
+                }
+                return FileVisitResult.CONTINUE;
+            }
+
+            @Override
+            public FileVisitResult visitFileFailed(Path file, IOException exc) {
+                return FileVisitResult.CONTINUE;
+            }
+        });
+        return true;
     }
 
     /**
