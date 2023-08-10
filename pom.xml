@@ -54,8 +54,9 @@
     <build>
         <plugins>
             <plugin>
+                <groupId>org.apache.maven.plugins</groupId>
                 <artifactId>maven-compiler-plugin</artifactId>
-                <version>3.8.0</version>
+                <version>3.11.0</version>
                 <configuration>
                     <compilerArgs>
                         <arg>--add-exports=java.base/jdk.internal.org.objectweb.asm=ALL-UNNAMED</arg>
