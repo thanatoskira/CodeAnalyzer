@@ -42,6 +42,7 @@ public class ClassNodeUtil {
                 throw new RuntimeException(e);
             }
         });
+        System.out.println("[+] Load ClassNodes From Dir Successfully");
     }
 
     /**
@@ -61,7 +62,9 @@ public class ClassNodeUtil {
                 reader.accept(node, flag);
                 classNodeMap.put(cName, node);
             } catch (IOException e) {
-                throw new RuntimeException("can not load class: " + cName);
+                // 尝试加载的类不存在于 classpath 和 rt.jar
+                System.out.println("[-] can not load class: " + cName);
+                return null;
             }
         }
         return node;
@@ -122,6 +125,10 @@ public class ClassNodeUtil {
     private static boolean loadClassNode(String file, Predicate<ZipEntry> filter) throws Exception {
         JarFile jarFile = new JarFile(file);
         Map<Object, ClassNode> classNodeMap = fileNodesMap.computeIfAbsent(file, k -> newExpiringMap());
+        // jar 中不包含 .class 文件则直接返回 true
+        if (jarFile.stream().noneMatch(f -> f.getName().endsWith(".class"))) {
+            return true;
+        }
         AtomicBoolean loaded = new AtomicBoolean(false);
         jarFile.stream().filter(filter).filter(f -> !f.getName().contains("/test/")).forEach(entry -> {
             try {
@@ -156,9 +163,8 @@ public class ClassNodeUtil {
     public static Map<Object, ClassNode> getClassNodesByFileName(String file) throws Exception {
         Map<Object, ClassNode> nodeMap = fileNodesMap.computeIfAbsent(file, k -> newExpiringMap());
         if (nodeMap.isEmpty()) {
-            if (!loadAllClassNodeFromFile(file)) {
-                throw new RuntimeException(String.format("can not load jar: %s", file));
-            }
+            // 无需考虑是否成功从 file 中获取到 ClassNodes
+            loadAllClassNodeFromFile(file);
         }
         return nodeMap;
     }
