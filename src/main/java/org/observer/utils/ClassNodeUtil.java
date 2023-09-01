@@ -12,8 +12,10 @@ import java.nio.file.attribute.BasicFileAttributes;
 import java.time.Duration;
 import java.util.List;
 import java.util.Map;
+import java.util.Set;
 import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.ConcurrentMap;
+import java.util.concurrent.CopyOnWriteArraySet;
 import java.util.concurrent.atomic.AtomicBoolean;
 import java.util.function.Predicate;
 import java.util.jar.JarFile;
@@ -22,6 +24,8 @@ import java.util.zip.ZipEntry;
 public class ClassNodeUtil {
     public final static String jdkFileName = "rt.jar";
     private final static Map<String, Map<Object, ClassNode>> fileNodesMap = new ConcurrentHashMap<>();
+    // 缓存加载失败的 Class
+    private final static Set<String> loadFailedClasses = new CopyOnWriteArraySet<>();
 
     /**
      * ClassReader.SKIP_CODE: skip the Code attributes
@@ -53,6 +57,9 @@ public class ClassNodeUtil {
     }
 
     public static ClassNode getClassNodeFromJDK(String cName) {
+        if (loadFailedClasses.contains(cName)) {
+            return null;
+        }
         Map<Object, ClassNode> classNodeMap = fileNodesMap.computeIfAbsent(jdkFileName, k -> newExpiringMap());
         ClassNode node = classNodeMap.get(cName);
         if (node == null) {
@@ -63,7 +70,8 @@ public class ClassNodeUtil {
                 classNodeMap.put(cName, node);
             } catch (IOException e) {
                 // 尝试加载的类不存在于 classpath 和 rt.jar
-                System.out.println("[-] can not load class: " + cName);
+                // System.out.println("[-] can not load class: " + cName);
+                loadFailedClasses.add(cName);
                 return null;
             }
         }
