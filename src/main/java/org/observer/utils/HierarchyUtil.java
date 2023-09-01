@@ -48,7 +48,7 @@ public class HierarchyUtil {
             node = ClassNodeUtil.getClassNodeFromJDK(cName);
         }
         // 如果当前为接口类，则直接返回
-        if ((node.access & Opcodes.ACC_INTERFACE) != 0) {
+        if (node == null || (node.access & Opcodes.ACC_INTERFACE) != 0) {
             return cName;
         }
 
