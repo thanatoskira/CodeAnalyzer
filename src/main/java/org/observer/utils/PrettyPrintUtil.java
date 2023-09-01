@@ -3,11 +3,7 @@ package org.observer.utils;
 import com.google.gson.Gson;
 
 import java.io.FileOutputStream;
-import java.util.HashSet;
-import java.util.List;
-import java.util.Map;
-import java.util.Set;
-import java.util.concurrent.ConcurrentHashMap;
+import java.util.*;
 
 public class PrettyPrintUtil {
     // 过滤输出结果
@@ -16,12 +12,23 @@ public class PrettyPrintUtil {
 
     public static void prettyPrint(Map map) {
         System.out.println("====== Pretty Print ======");
-        System.out.println(gson.toJson(filter(map)));
+        Map result = filter(map);
+        if (result.size() > 0) {
+            System.out.println(gson.toJson(result));
+        }
     }
 
     public static void saveToFile(Map map, String path) {
+        try (FileOutputStream outputStream = new FileOutputStream(String.format("%s.filter", path), true)) {
+            Map result = filter(map);
+            if (result.size() > 0) {
+                outputStream.write(gson.toJson(result).getBytes());
+            }
+        } catch (Exception e) {
+            e.printStackTrace();
+        }
         try (FileOutputStream outputStream = new FileOutputStream(path, true)) {
-            outputStream.write(gson.toJson(filter(map)).getBytes());
+            outputStream.write(gson.toJson(map).getBytes());
         } catch (Exception e) {
             e.printStackTrace();
         }
@@ -31,17 +38,25 @@ public class PrettyPrintUtil {
         filters.add(name);
     }
 
-    // 只进行一层过滤
-    private static Map filter(Map map) {
-        System.out.println("[+] Filter: " + filters);
-        if (filters.size() > 0) {
-            Map result = new ConcurrentHashMap();
+    // 过滤出包含关键词的部分
+    public static Map filter(Map map) {
+        if (filters.size() > 0 && map.keySet().size() > 0) {
+            Map results = new HashMap();
             map.entrySet().forEach(entry -> {
                 String key = (String) ((Map.Entry) entry).getKey();
-                List<Map> value = (List<Map>) ((Map.Entry) entry).getValue();
-                result.put(key, value.stream().filter(l -> filters.stream().anyMatch(filter -> gson.toJson(l).contains(filter))).toList());
+                List<Map> values = (List<Map>) ((Map.Entry) entry).getValue();
+                if (values.size() > 0) {
+                    if (filters.stream().anyMatch(key::contains)) {
+                        results.put(key, values);
+                    } else {
+                        List next = values.stream().map(PrettyPrintUtil::filter).filter(m -> m.size() > 0).toList();
+                        if (next.size() > 0) {
+                            results.put(key, next);
+                        }
+                    }
+                }
             });
-            return result;
+            return results;
         } else {
             return map;
         }
