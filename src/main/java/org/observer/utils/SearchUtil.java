@@ -130,6 +130,17 @@ public class SearchUtil {
             } catch (Exception e) {
                 throw new RuntimeException(e);
             }
-        }).map(methodNode -> String.format("%s#%s#%s#%s", classNode.name.replace("/", "."), methodNode.name, methodNode.desc, methodNode.access)).toList();
+        }).map(methodNode -> {
+            /*
+             存在方法调用位于 lambda 中的情况：lambda$getCombinationOfhead$0，实际对应的方法为 getCombinationOfhead
+             为避免存在重载函数的问题，这里直接忽略 desc 和 access
+            */
+            String newName = MethodUtil.lambdaTrim(methodNode.name);
+            if (!newName.equals(methodNode.name)) {
+                return String.format("%s#%s#null#1", classNode.name.replace("/", "."), newName);
+            } else {
+                return String.format("%s#%s#%s#%s", classNode.name.replace("/", "."), MethodUtil.lambdaTrim(methodNode.name), methodNode.desc, methodNode.access);
+            }
+        }).toList();
     }
 }

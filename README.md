@@ -15,3 +15,4 @@
 * 不同的搜索方法会存在同一搜索结果(A)的情况，之后对 A 回溯的步骤将存在重复执行的问题，如同一方法 A 中同时调用了如下两个方法，则对如下两个方法分别进行回溯时均会搜索至 A 方法，导致之后对 A 的回溯搜索存在重复工作问题
   * `com.alibaba.fastjson.JSON#toJSONString#(Ljava/lang/Object;)Ljava/lang/String;#9`
   * `com.alibaba.fastjson.JSON#parseObject#null#1`
+* [x] 如果方法调用位于如 `() -> {invoke();}` 的 lambda 中会导致回溯中断 

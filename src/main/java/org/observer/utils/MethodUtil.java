@@ -7,8 +7,21 @@ import jdk.internal.org.objectweb.asm.tree.MethodNode;
 
 import java.util.Arrays;
 import java.util.List;
+import java.util.regex.Matcher;
+import java.util.regex.Pattern;
 
 public class MethodUtil {
+    private final static Pattern lambdaPattern = Pattern.compile(".*\\$([^$]+)\\$\\d+$");
+
+    public static String lambdaTrim(String name) {
+        Matcher matcher = lambdaPattern.matcher(name);
+        if (matcher.matches()) {
+            return matcher.group(1);
+        } else {
+            return name;
+        }
+    }
+
     /**
      * 判断方法中是否存在 cName#fName 方法调用
      */
