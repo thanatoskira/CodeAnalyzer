@@ -1,16 +1,26 @@
 package org.observer.utils;
 
+import com.github.benmanes.caffeine.cache.Caffeine;
 import jdk.internal.org.objectweb.asm.Opcodes;
 import jdk.internal.org.objectweb.asm.tree.ClassNode;
 
+import java.time.Duration;
 import java.util.HashSet;
 import java.util.LinkedHashSet;
+import java.util.Map;
 import java.util.Set;
 
 public class HierarchyUtil {
+    // 缓存方法所对应的接口方法
+    private final static Map<Object, Object> ifaceMethodCache = Caffeine.newBuilder()
+            .expireAfterAccess(Duration.ofMinutes(5))
+            .build().asMap();
 
     /**
      * 判断两个类是否存在公共的父类/接口
+     *
+     * @param leftName  callee.owner
+     * @param rightName Call or upgradeCall
      */
     public static boolean hasCommonAncestor(String leftName, String rightName) {
         if (leftName.equals(rightName)) {
@@ -43,18 +53,23 @@ public class HierarchyUtil {
      * @return 接口方法类名
      */
     public static String getIfaceMethodClzName(String cName, String fName, String fDesc) throws Exception {
+        String key = String.format("%s#%s#%s", cName, fName, fDesc);
+        String result = (String) ifaceMethodCache.get(key);
+        if (result != null) {
+            return result;
+        }
         ClassNode node = ClassNodeUtil.getClassNodeByClassName(cName);
         if (node == null) {
             node = ClassNodeUtil.getClassNodeFromJDK(cName);
         }
         // 如果当前为接口类，则直接返回
         if (node == null || (node.access & Opcodes.ACC_INTERFACE) != 0) {
+            ifaceMethodCache.put(key, cName);
             return cName;
         }
 
         // 寻找接口方法
         Set<String> ifaces = getAllInterfaces(cName);
-        String result;
         result = ifaces.stream().map(iface -> iface.replace("/", ".")).filter(iface -> {
             try {
                 ClassNode ifaceNode = ClassNodeUtil.getClassNodeByClassName(iface);
@@ -76,6 +91,7 @@ public class HierarchyUtil {
                 }
             }).findFirst().orElse(cName);
         }
+        ifaceMethodCache.put(key, result);
         return result;
     }
 
