@@ -89,9 +89,10 @@ public class VulnUtil {
 
     public void commandInjectionScanner() {
         this.saveFile = "cmdinject.txt";
-        // 包含 java.lang.Runtime#exec
         System.out.println("[+] Start CommandInjectionScanner...");
         scan("java.lang.ProcessBuilder#start#()Ljava/lang/Process;#1");
+        // 虽然 ProcessBuilder#start 中会包含 java.lang.Runtime#exec，但前提时会扫描 rt.jar
+        scan("java.lang.Runtime#exec#null#1");
     }
 
     public void fileSecScanner() {
