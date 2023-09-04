@@ -52,7 +52,7 @@ public class VulnUtil {
     public void componentScanner() {
         this.saveFile = "component.json";
         System.out.println("[+] Start ComponentScanner...");
-        // apache cxf ssrf
+        // apache cxf ssrf: CVE-2022-46364
         scan("org.apache.cxf.aegis.type.mtom.ByteArrayType#readAttachment#null#1");
     }
 
