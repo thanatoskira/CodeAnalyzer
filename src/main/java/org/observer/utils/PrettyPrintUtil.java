@@ -47,14 +47,12 @@ public class PrettyPrintUtil {
             map.entrySet().forEach(entry -> {
                 String key = (String) ((Map.Entry) entry).getKey();
                 List<Map> values = (List<Map>) ((Map.Entry) entry).getValue();
-                if (values.size() > 0) {
-                    if (filters.stream().anyMatch(key::contains)) {
-                        results.put(key, values);
-                    } else {
-                        List next = values.stream().map(PrettyPrintUtil::filter).filter(m -> m.size() > 0).toList();
-                        if (next.size() > 0) {
-                            results.put(key, next);
-                        }
+                if (filters.stream().anyMatch(key::contains)) {
+                    results.put(key, values);
+                } else if (values.size() > 0) {
+                    List next = values.stream().map(PrettyPrintUtil::filter).filter(m -> m.size() > 0).toList();
+                    if (next.size() > 0) {
+                        results.put(key, next);
                     }
                 }
             });
