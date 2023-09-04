@@ -1,10 +1,13 @@
 package org.observer.utils;
 
+import org.codehaus.plexus.util.FileUtils;
+
 import java.io.File;
+import java.io.IOException;
 
 public class VulnUtil {
     private String saveDir = null;
-    private String saveFile = "default.txt";
+    private String saveFile = "default.json";
 
     public VulnUtil() {
     }
@@ -19,6 +22,8 @@ public class VulnUtil {
     }
 
     public void all() {
+        init();
+        componentScanner();
         ssrfScanner();
         templateScanner();
         jndiScanner();
@@ -32,21 +37,40 @@ public class VulnUtil {
         xxeScanner();
     }
 
+    public void init() {
+        File dir = new File(saveDir);
+        if (dir.exists()) {
+            try {
+                System.out.println("[!] Delete Directory " + dir);
+                FileUtils.deleteDirectory(dir);
+            } catch (IOException e) {
+                throw new RuntimeException(e);
+            }
+        }
+    }
+
+    public void componentScanner() {
+        this.saveFile = "component.json";
+        System.out.println("[+] Start ComponentScanner...");
+        // apache cxf ssrf
+        scan("org.apache.cxf.aegis.type.mtom.ByteArrayType#readAttachment#null#1");
+    }
+
     public void ssrfScanner() {
-        this.saveFile = "ssrf.txt";
+        this.saveFile = "ssrf.json";
         System.out.println("[+] Start SSRFScanner...");
         scan("java.net.URL#openConnection#()Ljava/net/URLConnection;#1");
     }
 
     public void templateScanner() {
-        this.saveFile = "tpl.txt";
+        this.saveFile = "tpl.json";
         System.out.println("[+] Start TemplateScanner...");
         scan("javax.validation.ConstraintValidatorContext#buildConstraintViolationWithTemplate#(Ljava/lang/String;)Ljavax/validation/ConstraintValidatorContext/ConstraintViolationBuilder;#1");
         scan("org.hibernate.validator.internal.engine.constraintvalidation.ConstraintValidatorContextImpl#buildConstraintViolationWithTemplate#(Ljava/lang/String;)Lorg/hibernate/validator/constraintvalidation/HibernateConstraintViolationBuilder;#1");
     }
 
     public void jndiScanner() {
-        this.saveFile = "jndi.txt";
+        this.saveFile = "jndi.json";
         System.out.println("[+] Start JndiScanner...");
         scan("javax.naming.Context#lookup#(Ljava/lang/String;)Ljava.lang.Object;#1");
         scan("javax.naming.Context#bind#(Ljava/lang/String;Ljava/lang/Object;)V#1");
@@ -55,23 +79,24 @@ public class VulnUtil {
     }
 
     public void ognlScanner() {
-        this.saveFile = "ognl.txt";
+        this.saveFile = "ognl.json";
         System.out.println("[+] Start OgnlScanner...");
         scan("com.opensymphony.xwork.util.TextParseUtil#translateVariables#(Ljava/lang/String;Lcom/opensymphony/xwork/util/OgnlValueStack;)Ljava/lang/String;#1");
         scan("org.springframework.expression.Expression#getValue#null#1");
     }
 
     public void deserializeScanner() {
-        this.saveFile = "deserialization.txt";
+        this.saveFile = "deserialization.json";
         System.out.println("[+] Start DeserializeScanner...");
         scan("java.io.ObjectInput#readObject#null#1");
         scan("java.io.Externalizable#readExternal#null#1");
         scan("com.thoughtworks.xstream#fromXML#null#1");
         scan("org.yaml.snakeyaml.Yaml#load#null#1");
+        scan("java.io.ObjectOutput#writeObject#null#1");
     }
 
     public void fastjsonScanner() {
-        this.saveFile = "fastjson.txt";
+        this.saveFile = "fastjson.json";
         System.out.println("[+] Start FastJsonScanner...");
         scan("com.alibaba.fastjson.JSON#parse#null#1");
         scan("com.alibaba.fastjson.JSON#parseObject#null#1");
@@ -79,7 +104,7 @@ public class VulnUtil {
     }
 
     public void expressionScanner() {
-        this.saveFile = "expression.txt";
+        this.saveFile = "expression.json";
         System.out.println("[+] Start ExpressionScanner...");
         scan("javax.script.ScriptEngine#eval#null#1");
         scan("groovy.lang.GroovyShell#evaluate#null#1");
@@ -88,7 +113,7 @@ public class VulnUtil {
     }
 
     public void commandInjectionScanner() {
-        this.saveFile = "cmdinject.txt";
+        this.saveFile = "cmdinject.json";
         System.out.println("[+] Start CommandInjectionScanner...");
         scan("java.lang.ProcessBuilder#start#()Ljava/lang/Process;#1");
         // 虽然 ProcessBuilder#start 中会包含 java.lang.Runtime#exec，但前提时会扫描 rt.jar
@@ -96,7 +121,7 @@ public class VulnUtil {
     }
 
     public void fileSecScanner() {
-        this.saveFile = "filesec.txt";
+        this.saveFile = "filesec.json";
         System.out.println("[+] Start FileSecScanner...");
         scan("java.io.File#renameTo#(Ljava/io/File;)V#1");
         scan("java.io.FileOutputStream#write#null#1");
@@ -104,13 +129,13 @@ public class VulnUtil {
     }
 
     public void zipSlipScanner() {
-        this.saveFile = "zipslip.txt";
+        this.saveFile = "zipslip.json";
         System.out.println("[+] Start ZipSlipScanner...");
         scan("java.util.zip.ZipEntry#init#null#1");
     }
 
     public void xxeScanner() {
-        this.saveFile = "xxe.txt";
+        this.saveFile = "xxe.json";
         System.out.println("[+] Start XXEScanner...");
         scan("org.jdom2.input.SAXBuilder#build#null#1");
         scan("javax.xml.parsers.SAXParser#parse#null#1");
@@ -136,6 +161,7 @@ public class VulnUtil {
         } else {
             File dir = new File(saveDir);
             if (!dir.exists()) {
+                System.out.println("[+] Create Directory " + dir);
                 if (!dir.mkdirs()) {
                     throw new RuntimeException("mkdir falied: " + dir);
                 }
