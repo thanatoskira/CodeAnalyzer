@@ -19,13 +19,15 @@ public class PrettyPrintUtil {
     }
 
     public static void saveToFile(Map map, String path) {
-        try (FileOutputStream outputStream = new FileOutputStream(String.format("%s.filter", path), true)) {
-            Map result = filter(map);
-            if (result.size() > 0) {
-                outputStream.write(gson.toJson(result).getBytes());
+        if (filters.size() > 0) {
+            try (FileOutputStream outputStream = new FileOutputStream(String.format("%s.filter", path), true)) {
+                Map result = filter(map);
+                if (result.size() > 0) {
+                    outputStream.write(gson.toJson(result).getBytes());
+                }
+            } catch (Exception e) {
+                e.printStackTrace();
             }
-        } catch (Exception e) {
-            e.printStackTrace();
         }
         try (FileOutputStream outputStream = new FileOutputStream(path, true)) {
             outputStream.write(gson.toJson(map).getBytes());
