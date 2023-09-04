@@ -43,7 +43,7 @@ public class MethodUtil {
                          */
                         String leftName = HierarchyUtil.getIfaceMethodClzName(miNode.owner.replace("/", "."), miNode.name, miNode.desc);
                         String rightName = HierarchyUtil.getIfaceMethodClzName(cName, fName, fDesc);
-                        if (leftName.equals(rightName)) {
+                        if (leftName != null && leftName.equals(rightName)) {
                             found = true;
                             break;
                         }
