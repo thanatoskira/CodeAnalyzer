@@ -2,7 +2,9 @@ package org.observer.utils;
 
 import com.google.gson.Gson;
 
+import java.io.File;
 import java.io.FileOutputStream;
+import java.nio.file.Files;
 import java.util.*;
 
 public class PrettyPrintUtil {
@@ -19,8 +21,12 @@ public class PrettyPrintUtil {
     }
 
     public static void saveToFile(Map map, String path) {
+        saveToFile(map, path, true);
+    }
+
+    public static void saveToFile(Map map, String path, boolean override) {
         if (filters.size() > 0) {
-            try (FileOutputStream outputStream = new FileOutputStream(String.format("%s.filter", path), true)) {
+            try (FileOutputStream outputStream = new FileOutputStream(String.format("%s.filter", path))) {
                 Map result = filter(map);
                 if (result.size() > 0) {
                     outputStream.write(gson.toJson(result).getBytes());
@@ -29,10 +35,12 @@ public class PrettyPrintUtil {
                 e.printStackTrace();
             }
         }
-        try (FileOutputStream outputStream = new FileOutputStream(path, true)) {
-            outputStream.write(gson.toJson(map).getBytes());
-        } catch (Exception e) {
-            e.printStackTrace();
+        if (override) {
+            try (FileOutputStream outputStream = new FileOutputStream(path)) {
+                outputStream.write(gson.toJson(map).getBytes());
+            } catch (Exception e) {
+                e.printStackTrace();
+            }
         }
     }
 
@@ -60,5 +68,12 @@ public class PrettyPrintUtil {
         } else {
             return map;
         }
+    }
+
+    // 从文件中解析 map 并执行 filter
+    public static void filterFromFile(String path) throws Exception {
+        File file = new File(path);
+        byte[] bytes = Files.readAllBytes(file.toPath());
+        saveToFile(gson.fromJson(new String(bytes), Map.class), path, false);
     }
 }
