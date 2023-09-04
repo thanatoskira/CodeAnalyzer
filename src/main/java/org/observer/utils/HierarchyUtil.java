@@ -53,6 +53,9 @@ public class HierarchyUtil {
      * @return 接口方法类名
      */
     public static String getIfaceMethodClzName(String cName, String fName, String fDesc) throws Exception {
+        if (cName.equals("java.lang.Object")) {
+            return null;
+        }
         String key = String.format("%s#%s#%s", cName, fName, fDesc);
         String result = (String) ifaceMethodCache.get(key);
         if (result != null) {
@@ -103,19 +106,21 @@ public class HierarchyUtil {
      */
     public static Set<String> getAllInterfaces(String cName) throws Exception {
         Set<String> ifaces = new HashSet<>();
-        ClassNode node = ClassNodeUtil.getClassNodeByClassName(cName);
-        if (node != null) {
-            node.interfaces.forEach(iface -> {
-                try {
-                    ifaces.add(iface);
-                    ifaces.addAll(getAllInterfaces(iface.replace("/", ".")));
-                } catch (Exception e) {
-                    throw new RuntimeException(e);
+        if (!cName.equals("java.lang.Object")) {
+            ClassNode node = ClassNodeUtil.getClassNodeByClassName(cName);
+            if (node != null) {
+                node.interfaces.forEach(iface -> {
+                    try {
+                        ifaces.add(iface);
+                        ifaces.addAll(getAllInterfaces(iface.replace("/", ".")));
+                    } catch (Exception e) {
+                        throw new RuntimeException(e);
+                    }
+                });
+                String superName = node.superName.replace("/", ".");
+                if (!superName.equals("java.lang.Object")) {
+                    ifaces.addAll(getAllInterfaces(superName));
                 }
-            });
-            String superName = node.superName.replace("/", ".");
-            if (!superName.equals("java.lang.Object")) {
-                ifaces.addAll(getAllInterfaces(superName));
             }
         }
         return ifaces;
