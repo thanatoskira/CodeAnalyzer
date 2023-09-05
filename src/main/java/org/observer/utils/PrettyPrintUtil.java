@@ -26,7 +26,7 @@ public class PrettyPrintUtil {
 
     public static void saveToFile(Map map, String path, boolean override) {
         if (filters.size() > 0) {
-            try (FileOutputStream outputStream = new FileOutputStream(String.format("%s.filter", path))) {
+            try (FileOutputStream outputStream = new FileOutputStream(String.format("%s_filter.json", path.substring(0, path.lastIndexOf("."))))) {
                 Map result = filter(map);
                 if (result.size() > 0) {
                     outputStream.write(gson.toJson(result).getBytes());
