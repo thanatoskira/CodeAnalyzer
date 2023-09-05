@@ -24,6 +24,7 @@ public class VulnUtil {
     public void all() {
         init();
         componentScanner();
+        dispatchScanner();
         jdbcScanner();
         ssrfScanner();
         templateScanner();
@@ -48,6 +49,13 @@ public class VulnUtil {
                 throw new RuntimeException(e);
             }
         }
+    }
+
+    public void dispatchScanner() {
+        this.saveFile = "dispatch.json";
+        System.out.println("[+] Start DispatchScanner...");
+        scan("javax.servlet.RequestDispatcher#forward#null#1");
+        scan("javax.servlet.RequestDispatcher#include#null#1");
     }
 
     public void jdbcScanner() {
