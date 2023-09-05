@@ -24,6 +24,7 @@ public class VulnUtil {
     public void all() {
         init();
         componentScanner();
+        jdbcScanner();
         ssrfScanner();
         templateScanner();
         jndiScanner();
@@ -47,6 +48,12 @@ public class VulnUtil {
                 throw new RuntimeException(e);
             }
         }
+    }
+
+    public void jdbcScanner() {
+        this.saveFile = "jdbc.json";
+        System.out.println("[+] Start JdbcScanner...");
+        scan("java.sql.DriverManager#getConnection#null#1");
     }
 
     public void componentScanner() {
