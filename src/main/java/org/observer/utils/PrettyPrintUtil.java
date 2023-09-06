@@ -26,17 +26,17 @@ public class PrettyPrintUtil {
 
     public static void saveToFile(Map map, String path, boolean override) {
         if (filters.size() > 0) {
-            try (FileOutputStream outputStream = new FileOutputStream(String.format("%s_filter.json", path.substring(0, path.lastIndexOf("."))))) {
-                Map result = filter(map);
-                if (result.size() > 0) {
+            Map result = filter(map);
+            if (result.size() > 0) {
+                try (FileOutputStream outputStream = new FileOutputStream(String.format("%s_filter.json", path.substring(0, path.lastIndexOf("."))), true)) {
                     outputStream.write(gson.toJson(result).getBytes());
+                } catch (Exception e) {
+                    e.printStackTrace();
                 }
-            } catch (Exception e) {
-                e.printStackTrace();
             }
         }
         if (override) {
-            try (FileOutputStream outputStream = new FileOutputStream(path)) {
+            try (FileOutputStream outputStream = new FileOutputStream(path, true)) {
                 outputStream.write(gson.toJson(map).getBytes());
             } catch (Exception e) {
                 e.printStackTrace();
