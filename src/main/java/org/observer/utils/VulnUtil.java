@@ -24,6 +24,7 @@ public class VulnUtil {
     public void all() {
         init();
         componentScanner();
+        redisOpScanner();
         dispatchScanner();
         jdbcScanner();
         ssrfScanner();
@@ -49,6 +50,18 @@ public class VulnUtil {
                 throw new RuntimeException(e);
             }
         }
+    }
+
+    public void redisOpScanner() {
+        this.saveFile = "redis.json";
+        System.out.println("[+] Start RedisOpScanner...");
+        scan("org.springframework.data.redis.core.ValueOperations#get#null#1");
+        scan("org.springframework.data.redis.core.ValueOperations#getAndSet#null#1");
+        scan("org.springframework.data.redis.core.ValueOperations#set#null#1");
+        scan("org.springframework.data.redis.core.HashOperations#get#null#1");
+        scan("org.springframework.data.redis.core.HashOperations#multiGet#null#1");
+        scan("org.springframework.data.redis.core.HashOperations#put#null#1");
+        scan("org.springframework.data.redis.core.HashOperations#putAll#null#1");
     }
 
     public void dispatchScanner() {
@@ -82,6 +95,8 @@ public class VulnUtil {
         System.out.println("[+] Start TemplateScanner...");
         scan("javax.validation.ConstraintValidatorContext#buildConstraintViolationWithTemplate#(Ljava/lang/String;)Ljavax/validation/ConstraintValidatorContext/ConstraintViolationBuilder;#1");
         scan("org.hibernate.validator.internal.engine.constraintvalidation.ConstraintValidatorContextImpl#buildConstraintViolationWithTemplate#(Ljava/lang/String;)Lorg/hibernate/validator/constraintvalidation/HibernateConstraintViolationBuilder;#1");
+        scan("org.springframework.web.servlet.ModelAndView#setViewName#null#1");
+        scan("org.springframework.web.servlet.ModelAndView#<init>#null#1");
     }
 
     public void jndiScanner() {
