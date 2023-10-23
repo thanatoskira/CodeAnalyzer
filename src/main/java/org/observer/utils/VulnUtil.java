@@ -24,6 +24,7 @@ public class VulnUtil {
     public void all() {
         init();
         componentScanner();
+        propertyScanner();
         redisOpScanner();
         dispatchScanner();
         jdbcScanner();
@@ -50,6 +51,13 @@ public class VulnUtil {
                 throw new RuntimeException(e);
             }
         }
+    }
+
+    public void propertyScanner() {
+        this.saveFile = "property.json";
+        System.out.println("[+] Start PropertyScanner...");
+        scan("java.lang.System#getProperty#(Ljava/lang/String;)Ljava/lang/String;#1");
+        scan("java.lang.System#setProperty#(Ljava/lang/String;,Ljava/lang/String;)Ljava/lang/String;#1");
     }
 
     public void redisOpScanner() {
