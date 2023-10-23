@@ -26,6 +26,8 @@ public class ClassNodeUtil {
     private final static Map<String, Map<Object, ClassNode>> fileNodesMap = new ConcurrentHashMap<>();
     // 缓存加载失败的 Class
     private final static Set<String> loadFailedClasses = new CopyOnWriteArraySet<>();
+    // 缓存加载失败的 JarFile
+    private final static Set<String> loadFailedJarFiles = new CopyOnWriteArraySet<>();
 
     /**
      * ClassReader.SKIP_CODE: skip the Code attributes
@@ -131,6 +133,9 @@ public class ClassNodeUtil {
      * @return 是否成功加载 ClassNode
      */
     private static boolean loadClassNode(String file, Predicate<ZipEntry> filter) throws Exception {
+        if (loadFailedJarFiles.contains(file)) {
+            return true;
+        }
         JarFile jarFile = new JarFile(file);
         Map<Object, ClassNode> classNodeMap = fileNodesMap.computeIfAbsent(file, k -> newExpiringMap());
         // jar 中不包含 .class 文件则直接返回 true
@@ -138,18 +143,23 @@ public class ClassNodeUtil {
             return true;
         }
         AtomicBoolean loaded = new AtomicBoolean(false);
-        jarFile.stream().filter(filter).filter(f -> !f.getName().contains("/test/")).forEach(entry -> {
-            try {
-                InputStream stream = jarFile.getInputStream(entry);
-                ClassReader reader = new ClassReader(stream);
-                ClassNode node = new ClassNode();
-                reader.accept(node, flag);
-                classNodeMap.put(node.name.replace("/", "."), node);
-                loaded.set(true);
-            } catch (IOException e) {
-                throw new RuntimeException(e);
-            }
-        });
+        try {
+            jarFile.stream().filter(filter).filter(f -> !f.getName().contains("/test/")).forEach(entry -> {
+                try {
+                    InputStream stream = jarFile.getInputStream(entry);
+                    ClassReader reader = new ClassReader(stream);
+                    ClassNode node = new ClassNode();
+                    reader.accept(node, flag);
+                    classNodeMap.put(node.name.replace("/", "."), node);
+                    loaded.set(true);
+                } catch (IOException e) {
+                    throw new RuntimeException(e);
+                }
+            });
+        } catch (Exception e) {
+            System.out.println("Error: " + file);
+            loadFailedJarFiles.add(file);
+        }
         return loaded.get();
     }
 
