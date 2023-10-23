@@ -171,6 +171,7 @@ public class VulnUtil {
         this.saveFile = "zipslip.json";
         System.out.println("[+] Start ZipSlipScanner...");
         scan("java.util.zip.ZipEntry#init#null#1");
+        scan("java.util.zip.ZipEntry#getName#null#1");
     }
 
     public void xxeScanner() {
