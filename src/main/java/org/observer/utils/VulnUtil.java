@@ -161,9 +161,10 @@ public class VulnUtil {
     public void fileSecScanner() {
         this.saveFile = "filesec.json";
         System.out.println("[+] Start FileSecScanner...");
-        scan("java.io.File#renameTo#(Ljava/io/File;)V#1");
+        scan("java.io.File#renameTo#(Ljava/io/File;)Z#1");
         scan("java.io.FileOutputStream#write#null#1");
         scan("java.io.FileInputStream#read#null#1");
+        scan("java.io.PrintWriter#write#(Ljava/lang/String;)V#1");
     }
 
     public void zipSlipScanner() {
