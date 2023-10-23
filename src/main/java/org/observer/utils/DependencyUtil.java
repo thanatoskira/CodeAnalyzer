@@ -267,12 +267,10 @@ public class DependencyUtil {
     /**
      * 获取 cName 所在及依赖该 jar 包的文件
      */
-    public static List<String> getAllDependencies(String cName) {
-        if (dependencyFileMap.isEmpty()) {
-            throw new RuntimeException("dependencyFileMap is empty");
-        }
-        // 所有缺失 pom.xml 文件的 jar 包均视为对当前 cName 进行依赖
-        List<String> result = new ArrayList<>(unCertainFiles);
+    public static Set<String> getAllDependencies(String cName) {
+        // 当只有一个 jar 包的情况下，允许存在 dependencyFileMap.isEmpty 的情况
+        // 所有缺失 pom.xml 文件的 jar 包均视为对当前 cName 进行依赖，cName 所在 Jar 包可能位于 unCertainFiles 中，因此使用 Set
+        Set<String> result = new HashSet<>(unCertainFiles);
         String file = DependencyUtil.getFilePathByFullQualifiedName(cName);
         if (file == null) {
             // 属于 JDK 中的类，但是未手动调用 ClasNodeUtil.loadAllClassNodeFromJDK() 进行类加载
