@@ -47,7 +47,11 @@ public class DependencyUtil {
     /**
      * 记录无法加载的类
      */
-    private final static List<String> unKnownClassNameList = new CopyOnWriteArrayList<>();
+    private final static List<String> unKnownClasses = new CopyOnWriteArrayList<>();
+    /**
+     * 记录无法加载的类
+     */
+    private final static List<String> loadPathFailedClasses = new CopyOnWriteArrayList<>();
     /**
      * 缓存 class -> file 映射
      */
@@ -231,7 +235,7 @@ public class DependencyUtil {
         if (pkgNameFileMap.isEmpty()) {
             throw new UnsupportedOperationException("pkgNameFileMap is empty");
         }
-        if (unKnownClassNameList.contains(cName)) {
+        if (loadPathFailedClasses.contains(cName)) {
             return null;
         }
         /*
@@ -258,7 +262,7 @@ public class DependencyUtil {
                 filePath = result.get();
                 clsNameFileMap.put(cName, filePath);
             } else {
-                unKnownClassNameList.add(cName);
+                loadPathFailedClasses.add(cName);
             }
         }
         return filePath;
@@ -271,6 +275,9 @@ public class DependencyUtil {
         // 当只有一个 jar 包的情况下，允许存在 dependencyFileMap.isEmpty 的情况
         // 所有缺失 pom.xml 文件的 jar 包均视为对当前 cName 进行依赖，cName 所在 Jar 包可能位于 unCertainFiles 中，因此使用 Set
         Set<String> result = new HashSet<>(unCertainFiles);
+        if (unKnownClasses.contains(cName)) {
+            return result;
+        }
         String file = DependencyUtil.getFilePathByFullQualifiedName(cName);
         if (file == null) {
             // 属于 JDK 中的类，但是未手动调用 ClasNodeUtil.loadAllClassNodeFromJDK() 进行类加载
@@ -280,6 +287,7 @@ public class DependencyUtil {
                 file = ClassNodeUtil.jdkFileName;
             } catch (ClassNotFoundException e) {
                 System.out.println("[-] can not get file by class name: " + cName);
+                unKnownClasses.add(cName);
                 return result;
             }
         } else {
