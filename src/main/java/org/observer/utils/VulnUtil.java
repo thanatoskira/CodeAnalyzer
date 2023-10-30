@@ -58,6 +58,7 @@ public class VulnUtil {
         System.out.println("[+] Start PropertyScanner...");
         scan("java.lang.System#getProperty#(Ljava/lang/String;)Ljava/lang/String;#1");
         scan("java.lang.System#setProperty#(Ljava/lang/String;,Ljava/lang/String;)Ljava/lang/String;#1");
+        scan("javax.servlet.ServletRequest#setAttribute#(Ljava/lang/String;Ljava/lang/Object;)V#1");
     }
 
     public void redisOpScanner() {
