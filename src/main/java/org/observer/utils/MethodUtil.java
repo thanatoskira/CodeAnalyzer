@@ -34,16 +34,7 @@ public class MethodUtil {
                 MethodInsnNode miNode = (MethodInsnNode) inode;
                 if (miNode.name.equals(fName) && (fDesc.equals("null") || miNode.desc.equals(fDesc))) {
                     try {
-                        /*
-                            使用 HierarchyUtil.hasCommonAncestor(miNode.owner.replace("/", "."), cName) 会导致两个不相关但存在相同父类或接口的类被关联在一起
-                            一个比较常见的场景就是 <init> 方法，如:
-                            搜索 cn.hutool.core.map.multi.CollectionValueMap#<init>()V 方法时会与 com.alibaba.fastjson.parser.JSONScanner#<init>()V 方法关联
-                            原因在于两者均实现了 java.lang.Cloneable 接口且 方法名 和 Desc 均一致
-                            解决方法为获取对应的接口方法类名，判断两者是否一致
-                         */
-                        String leftName = HierarchyUtil.getIfaceMethodClzName(miNode.owner.replace("/", "."), miNode.name, miNode.desc);
-                        String rightName = HierarchyUtil.getIfaceMethodClzName(cName, fName, fDesc);
-                        if (leftName != null && leftName.equals(rightName)) {
+                        if (miNode.owner.replace("/", ".").equals(cName)) {
                             found = true;
                             break;
                         }
