@@ -72,7 +72,7 @@ public class ClassNodeUtil {
                 classNodeMap.put(cName, node);
             } catch (IOException e) {
                 // 尝试加载的类不存在于 classpath 和 rt.jar
-                // System.out.println("[-] can not load class: " + cName);
+                System.out.println("[-] can not load class: " + cName + ", Error: " + e.getMessage());
                 loadFailedClasses.add(cName);
                 return null;
             }
