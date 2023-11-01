@@ -117,6 +117,7 @@ public class DependencyUtil {
            其他 jar 包与该文件的依赖的关系(dependencyFileMap)
          */
         if (!pomExist.get()) {
+            unCertainFiles.add(file);
             Map<String, String> mfs = new ConcurrentHashMap<>();
             jarFile.stream().filter(f -> {
                 String name = f.getName();
@@ -147,9 +148,7 @@ public class DependencyUtil {
             } else if (mfs.containsKey("Bundle-SymbolicName")) {
                 pkgName = mfs.get("Bundle-SymbolicName");
             }
-            if (pkgName == null || !pkgNamePattern.matcher(pkgName).matches()) {
-                unCertainFiles.add(file);
-            } else {
+            if (pkgName != null && !pkgNamePattern.matcher(pkgName).matches()) {
                 fileArtifactMap.put(file, pkgName);
             }
         }
