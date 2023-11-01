@@ -6,12 +6,15 @@ import jdk.internal.org.objectweb.asm.tree.MethodInsnNode;
 import jdk.internal.org.objectweb.asm.tree.MethodNode;
 
 import java.util.Arrays;
+import java.util.HashMap;
 import java.util.List;
+import java.util.Map;
 import java.util.regex.Matcher;
 import java.util.regex.Pattern;
 
 public class MethodUtil {
     private final static Pattern lambdaPattern = Pattern.compile(".*\\$([^$]+)\\$\\d+$");
+    private final static Map<String, String> relationCache = new HashMap<>();
 
     public static String lambdaTrim(String name) {
         Matcher matcher = lambdaPattern.matcher(name);
@@ -34,9 +37,26 @@ public class MethodUtil {
                 MethodInsnNode miNode = (MethodInsnNode) inode;
                 if (miNode.name.equals(fName) && (fDesc.equals("null") || miNode.desc.equals(fDesc))) {
                     try {
-                        if (miNode.owner.replace("/", ".").equals(cName)) {
+                        /*
+                            如下场景需要考虑：
+                            1. a 继承 b，a 调用 b 中方法 x，当搜索 b.x 方法调用时，此时 miNode.owner 为 a
+                         */
+                        String owner = miNode.owner.replace("/", ".");
+                        String key = String.format("%s#%s", owner, cName);
+                        if (owner.equals(cName) || (relationCache.containsKey(key) && relationCache.get(key).equals("true"))) {
                             found = true;
                             break;
+                        } else {
+                            if (!relationCache.containsKey(key)) {
+                                String status = String.valueOf(HierarchyUtil.isChildren(owner, cName));
+                                relationCache.put(key, status);
+                                if (status.equals("true")) {
+                                    found = true;
+                                    break;
+                                } else {
+                                    System.out.printf("[-] no match[%s]: %s !>> %s%n", fName, owner, cName);
+                                }
+                            }
                         }
                     } catch (Exception e) {
                         e.printStackTrace();

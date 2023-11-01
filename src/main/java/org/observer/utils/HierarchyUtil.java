@@ -38,4 +38,16 @@ public class HierarchyUtil {
         }
         return name;
     }
+
+    public static boolean isChildren(String child, String parent) {
+        ClassNode childNode = ClassNodeUtil.getSingleClassNodeByClassName(child);
+        if (childNode == null) {
+            return false;
+        }
+        String superName = childNode.superName.replace("/", ".");
+        if (superName == null || superName.equals("java.lang.Object")) {
+            return false;
+        }
+        return superName.equals(parent) || isChildren(superName, parent);
+    }
 }
