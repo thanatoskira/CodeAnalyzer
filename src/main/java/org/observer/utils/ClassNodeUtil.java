@@ -52,9 +52,14 @@ public class ClassNodeUtil {
         System.out.println("[+] Load ClassNodes From Dir Successfully");
     }
 
-    /**
-     * 加载 File 内所有的 Class
-     */
+
+    // 根据 className 加载对应的 ClassNode 对象
+    public static ClassNode getSingleClassNodeByClassName(String cName) {
+        String filePath = DependencyUtil.getFilePathByFullQualifiedName(cName);
+        return filePath != null ? loadAllClassNodeFromFile(filePath).get(cName) : null;
+    }
+
+    // 加载 File 内所有的 Class
     public static Map<Object, ClassNode> loadAllClassNodeFromFile(String file) {
         return loadClassNodeByFilter(file, f -> f.getName().endsWith(".class"));
     }
@@ -158,7 +163,7 @@ public class ClassNodeUtil {
      * @return ClassNode 列表
      */
     public static List<ClassNode> getAllClassNodeByPkgName(Map<Object, ClassNode> nodeMap, String cName) {
-        String pkgName = cName.substring(0, cName.lastIndexOf("."));
+        String pkgName = cName.substring(0, cName.lastIndexOf(".")).replace(".", "/");
         return nodeMap.values().stream().filter(node -> node.name.startsWith(pkgName)).toList();
     }
 
