@@ -28,11 +28,11 @@ import java.util.stream.Collectors;
 public class DependencyUtil {
     /**
      * dependency(groupId.artifactId) -> file 映射
-     * 当前 jar 包被哪些文件所依赖
+     * artifactId 被哪些文件所依赖
      */
-    private final static Map<String, Set<String>> dependencyFileMap = new HashMap<>();
-    // jar 依赖哪些文件
-    private final static Map<String, Set<String>> fileDependencyMap = new HashMap<>();
+    private final static Map<String, Set<String>> artifactIdGroupFileMap = new HashMap<>();
+    // jar 依赖哪些 artifactId
+    private final static Map<String, Set<String>> fileArtifactIdGroupMap = new HashMap<>();
     // 不包含 pom.xml 文件的 jar 包，无法确认哪些包依赖该文件
     private final static Set<String> unCertainFiles = new HashSet<>();
     // packageName(和 groupId.artifactId 可能一致) -> file 映射
@@ -101,10 +101,10 @@ public class DependencyUtil {
                 }
                 Set<String> depList = model.getDependencies().stream().map(dep -> String.format("%s.%s", dep.getGroupId().equals("${project.groupId}") ? groupId : dep.getGroupId(), dep.getArtifactId())).collect(Collectors.toSet());
                 depList.forEach(dep -> {
-                    Set<String> files = dependencyFileMap.computeIfAbsent(dep, k -> new HashSet<>());
+                    Set<String> files = artifactIdGroupFileMap.computeIfAbsent(dep, k -> new HashSet<>());
                     files.add(file);
                 });
-                fileDependencyMap.put(file, depList);
+                fileArtifactIdGroupMap.put(file, depList);
             } catch (IOException | XmlPullParserException e) {
                 throw new RuntimeException(e);
             }
@@ -200,13 +200,13 @@ public class DependencyUtil {
         }
     }
 
-    // 根据 pkgName 获取所在的文件，应返回最长匹配结果
-    public static String[] getFileByPkgName(String owner) {
+    // 根据 pkgName 获取所在的文件，应返回最长匹配结果，返回集合的原因在于存在同前缀的情况
+    public static Set<String> getFilesByPkgName(String owner) {
         if (pkgNameFileMap.isEmpty()) {
             throw new UnsupportedOperationException("pkgNameFileMap is empty");
         }
         AtomicInteger maxLen = new AtomicInteger();
-        List<String> fileList = new ArrayList<>();
+        Set<String> fileList = new HashSet<>();
         pkgNameFileMap.entrySet().stream().filter(
                 entry -> owner.startsWith(entry.getKey())
         ).forEach(entry -> {
@@ -219,7 +219,7 @@ public class DependencyUtil {
                 fileList.addAll(pkgNameFileMap.get(pkgName));
             }
         });
-        return fileList.toArray(new String[0]);
+        return fileList;
     }
 
     /**
@@ -347,9 +347,31 @@ public class DependencyUtil {
     // 递归获取所有相关依赖，down: true 表示向下搜索所有所需的依赖项，false 表示向上搜索依赖当前 Jar 包的依赖项
     private static Set<String> relatedDependencies(String jarPath, boolean isDown) {
         Set<String> results = new HashSet<>();
-        Map<String, Set<String>> map = isDown ? fileDependencyMap : dependencyFileMap;
-        map.getOrDefault(jarPath, new HashSet<>()).forEach(f -> results.addAll(relatedDependencies(f, isDown)));
+        collect(jarPath, isDown, results);
         return results;
+    }
+
+    private static void collect(String jarPath, boolean isDown, Set<String> loaded) {
+        if (!loaded.contains(jarPath)) {
+            Set<String> result;
+            loaded.add(jarPath);
+            if (isDown) {
+                // 先获取 jar 依赖的 pkgName，再根据 pkgName 获取对应的 Jar，递归获取所有相关依赖
+                result = fileArtifactIdGroupMap.get(jarPath).stream().map(DependencyUtil::getFilesByPkgName).flatMap(Collection::stream).collect(Collectors.toSet());
+            } else {
+                // 先获取 jar 的 artifactId，再获取依赖该 artifactId 的依赖项文件，递归获取所有相关依赖
+                result = artifactIdGroupFileMap.get(fileArtifactMap.get(jarPath));
+                if (result == null) {
+                    if (System.getProperty("log.print", "false").equals("true")) {
+                        System.out.println("[-] can not get file by artifactId: " + fileArtifactMap.get(jarPath));
+                    }
+                    return;
+                }
+            }
+            Set<String> copyResult = new HashSet<>(result);
+            copyResult.removeAll(loaded);
+            copyResult.forEach(f -> collect(f, isDown, loaded));
+        }
     }
 
     private static void addPkgFileMap(String pkgName, String file) {
@@ -359,8 +381,8 @@ public class DependencyUtil {
 
     public static void printSize() {
         System.out.println("pkgNameFileMap size: " + sum(pkgNameFileMap));
-        System.out.println("dependencyFileMap size: " + sum(dependencyFileMap));
-        System.out.println("fileDependencyMap size: " + sum(fileDependencyMap));
+        System.out.println("dependencyFileMap size: " + sum(artifactIdGroupFileMap));
+        System.out.println("fileDependencyMap size: " + sum(fileArtifactIdGroupMap));
         System.out.println("unCertainFiles size: " + unCertainFiles.size());
         System.out.println("loadFailedJarFiles size: " + loadFailedJarFiles.size());
         System.out.println("callOwnerCache size: " + callOwnerCache.size());
