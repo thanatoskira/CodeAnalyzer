@@ -33,7 +33,7 @@ public class SearchUtil {
 
         if (upgrade) {
             String owner = DependencyUtil.getCallOwner(callee);
-            if (owner != null) {
+            if (owner != null && !owner.equals(callItems[0])) {
                 finalRoot = new ConcurrentHashMap<>();
                 List upList = root.computeIfAbsent(callee, k -> new ArrayList<Map>());
                 upList.add(finalRoot);
