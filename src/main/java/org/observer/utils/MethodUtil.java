@@ -47,12 +47,8 @@ public class MethodUtil {
         return found;
     }
 
-    public static boolean isBlackMethod(MethodNode methodNode) {
-        return isBlackMethod(methodNode.name);
-    }
-
-    public static boolean isBlackMethod(String fName) {
+    public static boolean isValidMethod(MethodNode methodNode) {
         final List<String> blackMethods = Arrays.asList("main", "<clinit>");
-        return blackMethods.contains(fName);
+        return !blackMethods.contains(methodNode.name);
     }
 }

@@ -11,15 +11,15 @@ import java.util.concurrent.CopyOnWriteArrayList;
 
 
 public class SearchUtil {
-    public static Map<String, List> getBTCaller(String call) {
+    public static Map<String, List> getBTCaller(String calee) {
         Map<String, List> btTree = new ConcurrentHashMap<>();
-        getBTCallerInner(call, new CopyOnWriteArrayList<>(), btTree, false);
+        getBTCallerInner(calee, new CopyOnWriteArrayList<>(), btTree, false);
         return btTree;
     }
 
-    public static Map<String, List> getBTUpgradeCaller(String call) {
+    public static Map<String, List> getBTUpgradeCaller(String calee) {
         Map<String, List> btTree = new ConcurrentHashMap<>();
-        getBTCallerInner(call, new CopyOnWriteArrayList<>(), btTree, true);
+        getBTCallerInner(calee, new CopyOnWriteArrayList<>(), btTree, true);
         return btTree;
     }
 
@@ -27,30 +27,29 @@ public class SearchUtil {
      * 递归搜索所有 call 的 caller
      * 当 upgrade 至 父类/接口 方法时，添加 {x -> [super(x)]} 输出
      */
-    private static void getBTCallerInner(String call, List<String> group, Map<String, List> root, boolean upgrade) {
-        String[] callItems = call.split("#");
+    private static void getBTCallerInner(String callee, List<String> group, Map<String, List> root, boolean upgrade) {
+        String[] callItems = callee.split("#");
         Map<String, List> finalRoot = root;
+
         if (upgrade) {
-            // upgrade 至 接口/父类 方法
-            try {
-                String finalName = HierarchyUtil.getIfaceMethodClzName(callItems[0], callItems[1], callItems[2]);
-                if (!finalName.equals(callItems[0])) {
-                    finalRoot = new ConcurrentHashMap<>();
-                    List<Map> upList = root.computeIfAbsent(call, k -> new ArrayList<Map>());
-                    upList.add(finalRoot);
-                    callItems[0] = finalName;
-                }
-            } catch (Exception e) {
-                throw new RuntimeException(e);
+            String owner = DependencyUtil.getCallOwner(callee);
+            if (owner != null) {
+                finalRoot = new ConcurrentHashMap<>();
+                List upList = root.computeIfAbsent(callee, k -> new ArrayList<Map>());
+                upList.add(finalRoot);
+                callItems[0] = owner;
             }
         }
-        final String upgradeCall = String.join("#", callItems);
-        if (!group.contains(upgradeCall)) {
-            group.add(upgradeCall);
-            List<Map> elements = finalRoot.computeIfAbsent(upgradeCall, k -> new ArrayList<Map>());
-            DependencyUtil.getAllDependencies(callItems[0]).stream().map(f -> {
+        String finalCall = String.join("#", callItems);
+        if (!group.contains(finalCall)) {
+            if (System.getProperty("log.print", "false").equals("true")) {
+                System.out.println("Scan: " + finalCall + (!finalCall.equals(callee) ? " | From: " + callee : ""));
+            }
+            group.add(finalCall);
+            List elements = finalRoot.computeIfAbsent(finalCall, k -> new ArrayList<Map>());
+            DependencyUtil.getCallDependencies(finalCall).stream().map(f -> {
                 try {
-                    return getCallerFromFile(f, upgradeCall);
+                    return getCallerFromFile(f, finalCall);
                 } catch (Exception e) {
                     throw new RuntimeException(e);
                 }
@@ -66,51 +65,65 @@ public class SearchUtil {
                 }
             }));
         }
-        /**
-         * 清除 upgrade 过程中添加的空 map
-         * eg:
-         * {
-         *   "com.opensymphony.webwork.views.xslt.XSLTResult#execute#(Lcom/opensymphony/xwork/ActionInvocation;)V#1": [
-         *     {}
-         *   ]
-         * }
+        /*
+          清除 upgrade 过程中添加的空 map
+          eg: {"com.opensymphony.webwork.views.xslt.XSLTResult#execute#(Lcom/opensymphony/xwork/ActionInvocation;)V#1": [{}]}
          */
         if (finalRoot != root && finalRoot.isEmpty()) {
-            root.get(call).remove(finalRoot);
+            root.get(callee).remove(finalRoot);
         }
     }
 
     /**
      * 从单 jar 包中搜索 call 的 caller
      */
-    public static List<String> getCallerFromFile(String file, String call) throws Exception {
+    public static List<String> getCallerFromFile(String file, String call) {
         String[] splits = call.split("#");
         String cName = splits[0];
         String fName = splits[1];
         String fDesc = splits[2];
+
+        List<String> results = new ArrayList<>();
+        // 跳过空参数函数回溯
+        if (System.getProperty("params.empty.scan", "false").equals("false")) {
+            if (!fDesc.equals("null") && fDesc.contains("()")) {
+                return results;
+            }
+        }
+
         int fAccess = Integer.parseInt(splits[3]);
         boolean isPrivate = (fAccess & Opcodes.ACC_PRIVATE) != 0;
         boolean isProtected = (fAccess & Opcodes.ACC_PROTECTED) != 0;
 
-        Map<Object, ClassNode> nodeMap = ClassNodeUtil.getClassNodesByFileName(file);
-        List<String> callerList = new ArrayList<>();
+        Map<Object, ClassNode> loadedClassNodes = ClassNodeUtil.loadAllClassNodeFromFile(file);
 
-        // 未加载 file jar 包 或 private/proteced 方法所在文件与 file 不匹配
-        if (nodeMap.isEmpty() || ((isPrivate | isProtected) && !nodeMap.containsKey(cName))) {
-            return callerList;
+        // 跳过加载失败的 jar 包
+        if (loadedClassNodes.isEmpty()) {
+            return results;
+        }
+        // private/proteced 方法所在文件与 file 不匹配
+        if (((isPrivate || isProtected) && !loadedClassNodes.containsKey(cName))) {
+            System.out.println("[-] no match: " + cName + ", " + file);
+            throw new RuntimeException("error");
         }
 
         if (isPrivate) {
             // 从 cName 类中搜索 Caller
-            callerList.addAll(getCallersFromClassNode(nodeMap.get(cName), cName, fName, fDesc));
+            results.addAll(getCallersFromClassNode(loadedClassNodes.get(cName), cName, fName, fDesc));
         } else if (isProtected) {
             // 从 cName 同 pkgName 类中搜索 Caller
-            ClassNodeUtil.getClassNodesByPkgName(nodeMap, cName).stream().map(classNode -> getCallersFromClassNode(classNode, cName, fName, fDesc)).forEach(callerList::addAll);
+            ClassNodeUtil.getAllClassNodeByPkgName(loadedClassNodes, cName).stream().map(classNode -> getCallersFromClassNode(classNode, cName, fName, fDesc)).forEach(results::addAll);
         } else {
             // 从所有 ClassNode 中进行搜索
-            nodeMap.values().stream().map(classNode -> getCallersFromClassNode(classNode, cName, fName, fDesc)).forEach(callerList::addAll);
+            loadedClassNodes.values().stream().map(classNode -> {
+                if (loadedClassNodes.isEmpty()) {
+                    throw new RuntimeException("loadedClassNodes cleared");
+                }
+                return getCallersFromClassNode(classNode, cName, fName, fDesc);
+            }).forEach(results::addAll);
         }
-        return callerList;
+
+        return results;
     }
 
     /**
@@ -121,7 +134,7 @@ public class SearchUtil {
      * @param fDesc (Ljava/lang/String;)V or null
      */
     private static List<String> getCallersFromClassNode(ClassNode classNode, String cName, String fName, String fDesc) {
-        return classNode.methods.stream().filter(methodNode -> !MethodUtil.isBlackMethod(methodNode) &&
+        return classNode.methods.stream().filter(methodNode -> MethodUtil.isValidMethod(methodNode) &&
                 !classNode.name.replace("/", ".").equals(cName) || !methodNode.name.equals(fName) ||
                 (!fDesc.equals("null") && !methodNode.desc.equals(fDesc))
         ).filter(methodNode -> {

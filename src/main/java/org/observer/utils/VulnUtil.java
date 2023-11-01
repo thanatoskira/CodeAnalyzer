@@ -42,13 +42,15 @@ public class VulnUtil {
     }
 
     public void init() {
-        File dir = new File(saveDir);
-        if (dir.exists()) {
-            try {
-                System.out.println("[!] Delete Directory " + dir);
-                FileUtils.deleteDirectory(dir);
-            } catch (IOException e) {
-                throw new RuntimeException(e);
+        if(saveDir != null) {
+            File dir = new File(saveDir);
+            if (dir.exists()) {
+                try {
+                    System.out.println("[!] Delete Directory " + dir);
+                    FileUtils.deleteDirectory(dir);
+                } catch (IOException e) {
+                    throw new RuntimeException(e);
+                }
             }
         }
     }
