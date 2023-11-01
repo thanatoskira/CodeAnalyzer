@@ -133,6 +133,8 @@ public class VulnUtil {
         scan("java.io.Externalizable#readExternal#null#1");
         scan("com.thoughtworks.xstream#fromXML#null#1");
         scan("org.yaml.snakeyaml.Yaml#load#null#1");
+        scan("org.yaml.snakeyaml.Yaml#loadAll#null#1");
+        scan("org.yaml.snakeyaml.Yaml#loadAs#null#1");
         scan("java.io.ObjectOutput#writeObject#null#1");
         scan("com.alibaba.nacos.consistency.serialize.HessianSerializer#deserialize#null#1");
     }
