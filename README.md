@@ -20,4 +20,6 @@
   中同时调用了如下两个方法，则对如下两个方法分别进行回溯时均会搜索至 A 方法，导致之后对 A 的回溯搜索存在重复工作问题
     * `com.alibaba.fastjson.JSON#toJSONString#(Ljava/lang/Object;)Ljava/lang/String;#9`
     * `com.alibaba.fastjson.JSON#parseObject#null#1`
-* [x] 如果方法调用位于如 `() -> {invoke();}` 的 lambda 中会导致回溯中断 
+* [x] 如果方法调用位于如 `() -> {invoke();}` 的 lambda 中会导致回溯中断
+* [ ] 暂时是是对每个 call 单独进行回溯，是否可以同时扫描多个 call 减少执行次数
+* [x] 存在如 spring-beans-5.3.20.jar 文件，缺少 pom.xml 文件，但可以通过 MANIFEST.MF 正常获取到 pkgName，同时也不位于 unCertainFiles 列表中
