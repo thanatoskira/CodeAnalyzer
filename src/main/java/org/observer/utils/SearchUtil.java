@@ -2,15 +2,26 @@ package org.observer.utils;
 
 import jdk.internal.org.objectweb.asm.Opcodes;
 import jdk.internal.org.objectweb.asm.tree.ClassNode;
+import jdk.internal.org.objectweb.asm.tree.MethodNode;
 
-import java.util.ArrayList;
-import java.util.List;
-import java.util.Map;
+import java.util.*;
 import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.CopyOnWriteArrayList;
 
+import static org.observer.utils.StringUtil.x;
+
 
 public class SearchUtil {
+    private static final Set<String> allowPrefix = new HashSet<>();
+    private static final Set<String> stopInterfaces = new HashSet<>();
+
+    static {
+        allowPrefix.addAll(Arrays.asList(
+                "javax.sql.",
+                "javax.naming."
+        ));
+    }
+
     public static Map<String, List> getBTCaller(String calee) {
         Map<String, List> btTree = new ConcurrentHashMap<>();
         getBTCallerInner(calee, new CopyOnWriteArrayList<>(), btTree, false);
@@ -32,8 +43,23 @@ public class SearchUtil {
         Map<String, List> finalRoot = root;
 
         if (upgrade) {
-            String owner = DependencyUtil.getCallOwner(callee);
+            String owner = DependencyUtil.getCalleeOwnerInterfaceName(callee);
             if (owner != null && !owner.equals(callItems[0])) {
+                if (stopInterfaces.contains(owner)) {
+                    return;
+                }
+                try {
+                    Class.forName(owner);
+                    String method = String.format("%s#%s", owner, callItems[1]);
+                    // 非白名单的 jdk 接口则不进行回溯
+                    if (!callItems[2].equals("null") && allowPrefix.stream().noneMatch(method::startsWith)) {
+                        stopInterfaces.add(owner);
+                        root.computeIfAbsent(callee, k -> new ArrayList<Map>());
+                        System.out.printf("[!] jdk interface stop: %s#%s, from %s%n", owner, callItems[1], callItems[0]);
+                        return;
+                    }
+                } catch (ClassNotFoundException ignored) {
+                }
                 finalRoot = new ConcurrentHashMap<>();
                 List upList = root.computeIfAbsent(callee, k -> new ArrayList<Map>());
                 upList.add(finalRoot);
@@ -95,32 +121,15 @@ public class SearchUtil {
         boolean isPrivate = (fAccess & Opcodes.ACC_PRIVATE) != 0;
         boolean isProtected = (fAccess & Opcodes.ACC_PROTECTED) != 0;
 
-        Map<Object, ClassNode> loadedClassNodes = ClassNodeUtil.loadAllClassNodeFromFile(file);
-
-        // 跳过加载失败的 jar 包
-        if (loadedClassNodes.isEmpty()) {
-            return results;
-        }
-        // private/proteced 方法所在文件与 file 不匹配
-        if (((isPrivate || isProtected) && !loadedClassNodes.containsKey(cName))) {
-            System.out.println("[-] no match: " + cName + ", " + file);
-            throw new RuntimeException("error");
-        }
-
         if (isPrivate) {
             // 从 cName 类中搜索 Caller
-            results.addAll(getCallersFromClassNode(loadedClassNodes.get(cName), cName, fName, fDesc));
+            results.addAll(getCallersFromClassNode(ClassNodeUtil.getClassNodeFromCache(cName), cName, fName, fDesc));
         } else if (isProtected) {
             // 从 cName 同 pkgName 类中搜索 Caller
-            ClassNodeUtil.getAllClassNodeByPkgName(loadedClassNodes, cName).stream().map(classNode -> getCallersFromClassNode(classNode, cName, fName, fDesc)).forEach(results::addAll);
+            ClassNodeUtil.loadAllPkgClassNodeFromFile(file, ClassNodeUtil.getPkgName(cName)).stream().map(classNode -> getCallersFromClassNode(classNode, cName, fName, fDesc)).forEach(results::addAll);
         } else {
             // 从所有 ClassNode 中进行搜索
-            loadedClassNodes.values().stream().map(classNode -> {
-                if (loadedClassNodes.isEmpty()) {
-                    throw new RuntimeException("loadedClassNodes cleared");
-                }
-                return getCallersFromClassNode(classNode, cName, fName, fDesc);
-            }).forEach(results::addAll);
+            ClassNodeUtil.loadAllClassNodeFromFile(file).values().stream().map(classNode -> getCallersFromClassNode(classNode, cName, fName, fDesc)).forEach(results::addAll);
         }
 
         return results;
@@ -134,8 +143,11 @@ public class SearchUtil {
      * @param fDesc (Ljava/lang/String;)V or null
      */
     private static List<String> getCallersFromClassNode(ClassNode classNode, String cName, String fName, String fDesc) {
-        return classNode.methods.stream().filter(methodNode -> MethodUtil.isValidMethod(methodNode) &&
-                !classNode.name.replace("/", ".").equals(cName) || !methodNode.name.equals(fName) ||
+        if (classNode == null || ClassNodeUtil.isInterface(classNode)) {
+            return new ArrayList<>();
+        }
+        return classNode.methods.stream().filter(methodNode -> MethodUtil.isValidMethod(methodNode.name) &&
+                !x(classNode.name).equals(cName) || !methodNode.name.equals(fName) ||
                 (!fDesc.equals("null") && !methodNode.desc.equals(fDesc))
         ).filter(methodNode -> {
             try {
@@ -145,15 +157,32 @@ public class SearchUtil {
             }
         }).map(methodNode -> {
             /*
-             存在方法调用位于 lambda 中的情况：lambda$getCombinationOfhead$0，实际对应的方法为 getCombinationOfhead
+             1. 存在方法调用位于 lambda 中的情况：lambda$getCombinationOfhead$0，实际对应的方法为 getCombinationOfhead
              为避免存在重载函数的问题，这里直接忽略 desc 和 access
+             2. 存在 seq_containsBI.this.checkMethodArgCount 方法调用，fName = access$1000
             */
             String newName = MethodUtil.lambdaTrim(methodNode.name);
+            String name = x(classNode.name);
             if (!newName.equals(methodNode.name)) {
-                return String.format("%s#%s#null#1", classNode.name.replace("/", "."), newName);
+                if (System.getProperty("log.print", "false").equals("true")) {
+                    System.out.printf("[!] is lambda method: %s.%s -> %s%n", classNode.name, methodNode.name, newName);
+                }
+                List<MethodNode> methods = MethodUtil.getMaxParamMatchMethods(newName, classNode);
+                if (methods.size() > 1) {
+                    return String.format("%s#%s#null#1", name, newName);
+                } else if (methods.size() == 1) {
+                    return String.format("%s#%s#%s#1", name, newName, methods.get(0).desc);
+                } else {
+                    // 存在 lambda$null$2 命名情况
+                    return String.format("%s#%s#null#%s", name, newName, methodNode.access);
+                }
             } else {
-                return String.format("%s#%s#%s#%s", classNode.name.replace("/", "."), MethodUtil.lambdaTrim(methodNode.name), methodNode.desc, methodNode.access);
+                return String.format("%s#%s#%s#%s", name, MethodUtil.lambdaTrim(methodNode.name), methodNode.desc, methodNode.access);
             }
         }).toList();
+    }
+
+    public static void addAllowPrefix(String prefix) {
+        allowPrefix.add(prefix);
     }
 }

@@ -4,6 +4,8 @@ import org.codehaus.plexus.util.FileUtils;
 
 import java.io.File;
 import java.io.IOException;
+import java.util.List;
+import java.util.Map;
 
 public class VulnUtil {
     private String saveDir = null;
@@ -24,7 +26,6 @@ public class VulnUtil {
     public void all() {
         init();
         componentScanner();
-        propertyScanner();
         redisOpScanner();
         dispatchScanner();
         jdbcScanner();
@@ -41,8 +42,12 @@ public class VulnUtil {
         xxeScanner();
     }
 
+    public void others() {
+        propertyScanner();
+    }
+
     public void init() {
-        if(saveDir != null) {
+        if (saveDir != null) {
             File dir = new File(saveDir);
             if (dir.exists()) {
                 try {
@@ -51,6 +56,10 @@ public class VulnUtil {
                 } catch (IOException e) {
                     throw new RuntimeException(e);
                 }
+            }
+            System.out.println("[+] Create Directory " + dir);
+            if (!dir.mkdirs()) {
+                throw new RuntimeException("mkdir failed: " + dir);
             }
         }
     }
@@ -78,8 +87,8 @@ public class VulnUtil {
     public void dispatchScanner() {
         this.saveFile = "dispatch.json";
         System.out.println("[+] Start DispatchScanner...");
-        scan("javax.servlet.RequestDispatcher#forward#null#1");
-        scan("javax.servlet.RequestDispatcher#include#null#1");
+        scan("javax.servlet.RequestDispatcher#forward#(Ljavax/servlet/ServletRequest;Ljavax/servlet/ServletResponse;)V#1");
+        scan("javax.servlet.RequestDispatcher#include#(Ljavax/servlet/ServletRequest;Ljavax/servlet/ServletResponse;)V#1");
     }
 
     public void jdbcScanner() {
@@ -123,6 +132,8 @@ public class VulnUtil {
         this.saveFile = "ognl.json";
         System.out.println("[+] Start OgnlScanner...");
         scan("com.opensymphony.xwork.util.TextParseUtil#translateVariables#(Ljava/lang/String;Lcom/opensymphony/xwork/util/OgnlValueStack;)Ljava/lang/String;#1");
+        scan("ognl.Ognl#getValue#null#1");
+        scan("ognl.Ognl#setValue#null#1");
         scan("org.springframework.expression.Expression#getValue#null#1");
     }
 
@@ -198,25 +209,21 @@ public class VulnUtil {
     }
 
     public void scan(String call, boolean bt) {
-        if (saveDir == null) {
-            if (bt) {
-                PrettyPrintUtil.prettyPrint(SearchUtil.getBTUpgradeCaller(call));
-            } else {
-                PrettyPrintUtil.prettyPrint(SearchUtil.getBTCaller(call));
-            }
+        long start = System.currentTimeMillis();
+        if (bt) {
+            saveResult(SearchUtil.getBTUpgradeCaller(call));
         } else {
-            File dir = new File(saveDir);
-            if (!dir.exists()) {
-                System.out.println("[+] Create Directory " + dir);
-                if (!dir.mkdirs()) {
-                    throw new RuntimeException("mkdir falied: " + dir);
-                }
-            }
-            if (bt) {
-                PrettyPrintUtil.saveToFile(SearchUtil.getBTUpgradeCaller(call), String.format("%s/%s", saveDir, saveFile));
-            } else {
-                PrettyPrintUtil.saveToFile(SearchUtil.getBTCaller(call), String.format("%s/%s", saveDir, saveFile));
-            }
+            saveResult(SearchUtil.getBTCaller(call));
+        }
+        long stop = System.currentTimeMillis();
+        System.out.printf("[SpendTime: %sms] %s%n", (stop - start), call);
+    }
+
+    private void saveResult(Map<String, List> results) {
+        if (saveDir == null) {
+            PrettyPrintUtil.prettyPrint(results);
+        } else {
+            PrettyPrintUtil.saveToFile(results, String.format("%s/%s", saveDir, saveFile));
         }
     }
 }

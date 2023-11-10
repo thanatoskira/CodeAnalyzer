@@ -1,28 +1,35 @@
 package org.observer.utils;
 
+import com.github.benmanes.caffeine.cache.Caffeine;
+import com.github.benmanes.caffeine.cache.LoadingCache;
 import jdk.internal.org.objectweb.asm.Opcodes;
-import jdk.internal.org.objectweb.asm.tree.ClassNode;
 import org.apache.commons.lang3.StringUtils;
 import org.apache.maven.model.Model;
 import org.apache.maven.model.io.xpp3.MavenXpp3Reader;
 import org.codehaus.plexus.util.xml.pull.XmlPullParserException;
 
-import java.io.BufferedReader;
 import java.io.File;
 import java.io.IOException;
-import java.io.InputStreamReader;
+import java.net.URL;
+import java.net.URLClassLoader;
 import java.nio.file.Files;
+import java.nio.file.Path;
 import java.nio.file.Paths;
+import java.time.Duration;
 import java.util.*;
 import java.util.concurrent.ConcurrentHashMap;
-import java.util.concurrent.CopyOnWriteArrayList;
-import java.util.concurrent.CopyOnWriteArraySet;
 import java.util.concurrent.atomic.AtomicBoolean;
 import java.util.concurrent.atomic.AtomicInteger;
 import java.util.concurrent.atomic.AtomicReference;
 import java.util.jar.JarFile;
+import java.util.jar.Manifest;
+import java.util.regex.Matcher;
 import java.util.regex.Pattern;
 import java.util.stream.Collectors;
+import java.util.stream.Stream;
+
+import static org.observer.utils.StringUtil.x;
+import static org.observer.utils.StringUtil.y;
 
 // 用于解析 Jar 包并提取 packageName 及 dependencies
 public class DependencyUtil {
@@ -30,128 +37,166 @@ public class DependencyUtil {
      * dependency(groupId.artifactId) -> file 映射
      * artifactId 被哪些文件所依赖
      */
-    private final static Map<String, Set<String>> artifactIdGroupFileMap = new HashMap<>();
+    private final static Map<String, Set<String>> artifactIdGroupFileMap = new ConcurrentHashMap<>();
     // jar 依赖哪些 artifactId
-    private final static Map<String, Set<String>> fileArtifactIdGroupMap = new HashMap<>();
+    private final static Map<String, Set<String>> fileArtifactIdGroupMap = new ConcurrentHashMap<>();
     // 不包含 pom.xml 文件的 jar 包，无法确认哪些包依赖该文件
-    private final static Set<String> unCertainFiles = new HashSet<>();
+    // 包含无法正确解析出 artifactId 的 jar 包
+    private final static Set<String> missArtifactIdFiles = new HashSet<>();
+    // 缓存缺失 pom.xml 的 jar
+    private final static Set<String> missPomFiles = new HashSet<>();
     // packageName(和 groupId.artifactId 可能一致) -> file 映射
-    private final static Map<String, List<String>> pkgNameFileMap = new HashMap<>();
+    private final static Map<String, Set<String>> pkgNameFileMap = new HashMap<>();
     // file -> groupId.artifactId 映射
-    private final static Map<String, String> fileArtifactMap = new HashMap<>();
+    private final static Map<String, String> fileArtifactIdMap = new HashMap<>();
+    // file 包含哪些 packageName
+    private final static Map<String, Set<String>> filePkgNameMap = new HashMap<>();
     // 缓存加载失败的 JarFile
-    private final static Set<String> loadFailedJarFiles = new CopyOnWriteArraySet<>();
+    private final static Set<String> loadFailedJarFiles = new HashSet<>();
     // 记录无法加载的类
-    private final static List<String> loadPathFailedClasses = new CopyOnWriteArrayList<>();
+    private final static Set<String> loadPathFailedClasses = new HashSet<>();
     // 缓存 call -> 父类/接口 类名映射
     private final static Map<Object, String> callOwnerCache = new ConcurrentHashMap<>();
+    // 缓存 relatedDependencies 解析结果
+    private final static Map<Object, Set<String>> relatedDependenciesCache = new ConcurrentHashMap<>();
     // 存储 lib 中 /rt.jar jdk 文件，后续用于排除
     private static String jdkFilePath = null;
     // 缓存 class -> 所在文件位置 映射
-    private final static Map<Object, String> clsNameFileMap = new ConcurrentHashMap<>();
+    private final static LoadingCache<String, String> clsNameFileMap = Caffeine.newBuilder()
+            .expireAfterAccess(Duration.ofMinutes(5))
+            .expireAfterWrite(Duration.ofMinutes(2))
+            .initialCapacity(300)
+            .maximumSize(1000)
+            .build(DependencyUtil::getJarPathByClassName);
     private final static MavenXpp3Reader reader = new MavenXpp3Reader();
     private final static int minCommonPrefixLen = 2;
-    private final static String[] pkgPrefix = new String[]{"Automatic-Module-Name", "Implementation-Title", "Implementation-Vendor-Id", "Bundle-SymbolicName"};
-    private final static Pattern pkgNamePattern = Pattern.compile("[\\w\\-;.\\d#]+");
+    private final static Pattern artifactIdPattern = Pattern.compile("^[\\w.-]+$");
+    private static int loadedJarCount = 0;
+    public final static Pattern antFilePattern = Pattern.compile("^([\\w-.]+)_([\\w-]+)-((\\d+\\.\\d+(\\.\\d+)*|\\d+)[\\w-+.]*\\.jar)$");
 
     public static void resolveDir(String dir) throws Exception {
         if (!new File(dir).isDirectory()) {
             throw new RuntimeException(String.format("%s must be dir", dir));
         }
-        Files.walk(Paths.get(dir)).filter(f -> f.toFile().getName().endsWith(".jar")).forEach(f -> {
-            try {
-                resolve(f.toString());
-            } catch (Exception e) {
-                throw new RuntimeException(e);
-            }
-        });
+        try (Stream<Path> entries = Files.walk(Paths.get(dir))) {
+            entries.filter(f -> f.toFile().getName().endsWith(".jar")).forEach(f -> {
+                try {
+                    resolve(f.toString());
+                    loadedJarCount += 1;
+                } catch (Exception e) {
+                    throw new RuntimeException(e);
+                }
+            });
+        }
+        System.out.println("[!] loadedJar Count: " + loadedJarCount);
+        System.out.println("[!] missArtifactIdFiles count: " + missArtifactIdFiles.size());
+        System.out.println("[!] missPomFiles count: " + missPomFiles.size());
         System.out.println("[+] Resolve Dependencies Dir Successfully");
     }
 
     // 通过 pom.xml 建立 packageName -> dependencies 和 packageName -> files 映射
     public static void resolve(String file) throws Exception {
-        JarFile jarFile = new JarFile(file);
-
-        AtomicReference<String> packageName = new AtomicReference<>(null);
-        AtomicBoolean pomExist = new AtomicBoolean(false);
-        // 不包含 .class 文件直接跳过处理
-        if (jarFile.stream().noneMatch(f -> f.getName().endsWith(".class"))) {
-            loadFailedJarFiles.add(file);
-            return;
-        }
-        if (isJDK(file)) {
-            jdkFilePath = file;
-            System.out.println("[!] Found rt.jar: " + jdkFilePath);
-        }
-        // TODO: 存在两个 pom.xml 的情况
-        jarFile.stream().filter(f -> {
-            String name = f.getName();
-            return name.startsWith("META-INF") && name.endsWith("pom.xml");
-        }).findFirst().ifPresent(xml -> {
-            try {
-                pomExist.set(true);
-                Model model = reader.read(jarFile.getInputStream(xml));
-                String groupId = model.getGroupId() == null ? model.getParent().getGroupId() : model.getGroupId();
-                packageName.set(String.format("%s.%s", groupId, model.getArtifactId()));
-                fileArtifactMap.put(file, packageName.get());
-                if (jarFile.getJarEntry(packageName.get().replace(".", "/")) == null) {
-                    packageName.set(null);
-                } else {
-                    addPkgFileMap(packageName.get(), file);
-                }
-                Set<String> depList = model.getDependencies().stream().map(dep -> String.format("%s.%s", dep.getGroupId().equals("${project.groupId}") ? groupId : dep.getGroupId(), dep.getArtifactId())).collect(Collectors.toSet());
-                depList.forEach(dep -> {
-                    Set<String> files = artifactIdGroupFileMap.computeIfAbsent(dep, k -> new HashSet<>());
-                    files.add(file);
-                });
-                fileArtifactIdGroupMap.put(file, depList);
-            } catch (IOException | XmlPullParserException e) {
-                throw new RuntimeException(e);
+        try (JarFile jarFile = new JarFile(file)) {
+            // 不包含 .class 文件直接跳过处理
+            if (jarFile.stream().noneMatch(f -> f.getName().endsWith(".class"))) {
+                loadFailedJarFiles.add(file);
+                return;
             }
-        });
-
-        /*
-          不存在 pom.xml 文件情况，则对 MANIFEST.MF 进行解析
-          缺失:
-           文件与包名的映射关系(fileArtifactMap)
-           其他 jar 包与该文件的依赖的关系(dependencyFileMap)
-         */
-        if (!pomExist.get()) {
-            unCertainFiles.add(file);
-            Map<String, String> mfs = new ConcurrentHashMap<>();
+            if (isJDK(file)) {
+                jdkFilePath = file;
+                System.out.println("[!] Found rt.jar: " + jdkFilePath);
+            }
+            AtomicBoolean pomExist = new AtomicBoolean(false);
+            AtomicReference<String> packageName = new AtomicReference<>(null);
+            // TODO: 存在两个 pom.xml 的情况
             jarFile.stream().filter(f -> {
                 String name = f.getName();
-                return name.startsWith("META-INF") && name.endsWith("MANIFEST.MF");
-            }).findFirst().ifPresent(mf -> {
+                return name.startsWith("META-INF") && name.endsWith("pom.xml");
+            }).findFirst().ifPresent(xml -> {
                 try {
-                    BufferedReader reader = new BufferedReader(new InputStreamReader(jarFile.getInputStream(mf)));
-                    String line;
-                    while ((line = reader.readLine()) != null) {
-                        if (Arrays.stream(pkgPrefix).anyMatch(line::startsWith)) {
-                            String[] splits = line.split(":");
-                            mfs.put(splits[0].trim(), splits[1].trim());
-                        }
+                    pomExist.set(true);
+                    Model model = reader.read(jarFile.getInputStream(xml));
+                    String groupId = model.getGroupId() == null ? model.getParent().getGroupId() : model.getGroupId();
+                    String artifactId = String.format("%s.%s", groupId, model.getArtifactId());
+                    fileArtifactIdMap.put(file, artifactId);
+                    // 判断 artifactId 与 packageName 是否一致
+                    if ((jarFile.getJarEntry(y(artifactId)) != null)) {
+                        packageName.set(artifactId);
+                        addPkgFileMap(artifactId, file);
                     }
-                } catch (IOException e) {
+                    // 构建依赖链
+                    Set<String> dependencies = model.getDependencies().stream().map(dep -> String.format("%s.%s", dep.getGroupId().equals("${project.groupId}") ? groupId : dep.getGroupId(), dep.getArtifactId())).collect(Collectors.toSet());
+                    dependencies.forEach(dep -> {
+                        Set<String> files = artifactIdGroupFileMap.computeIfAbsent(dep, k -> new HashSet<>());
+                        files.add(file);
+                    });
+                    fileArtifactIdGroupMap.put(file, dependencies);
+                } catch (IOException | XmlPullParserException e) {
                     throw new RuntimeException(e);
                 }
             });
-            String pkgName = null;
-            if (mfs.containsKey("Automatic-Module-Name")) {
-                pkgName = mfs.get("Automatic-Module-Name");
-            } else if (mfs.containsKey("Implementation-Vendor-Id")) {
-                pkgName = mfs.get("Implementation-Vendor-Id");
-            } else if (mfs.containsKey("Implementation-Title")) {
-                pkgName = mfs.get("Implementation-Title");
-                pkgName = pkgName.contains(";") ? pkgName.split(";")[0] : pkgName;
-                pkgName = pkgName.replace("#", ".");
-            } else if (mfs.containsKey("Bundle-SymbolicName")) {
-                pkgName = mfs.get("Bundle-SymbolicName");
+
+        /*
+          不存在 pom.xml 文件情况，则通过 MANIFEST.MF 解析 artifactId
+          如果可以通过 MANIFEST.MF 解析出 artifactId，则视为该依赖只依赖 JDK
+          缺失映射关系:
+           文件与包名的映射关系(fileArtifactMap)
+           其他 jar 包与该文件的依赖的关系(dependencyFileMap)
+         */
+            if (!pomExist.get()) {
+                missPomFiles.add(jarFile.getName());
+                Manifest manifest = jarFile.getManifest();
+                String artifactId = null;
+                if (manifest != null) {
+                /*
+                    属于 Ant-Version 打包，文件名格式为 net.jcip_jcip-annotations-1.0.jar
+                 */
+                    String fileName = new File(jarFile.getName()).getName();
+                    Matcher matcher = antFilePattern.matcher(fileName);
+                    if (StringUtils.countMatches(fileName, "_") == 1 && matcher.matches()) {
+                        artifactId = String.format("%s.%s", matcher.group(1), matcher.group(2));
+                    }
+                    if (!isValidArtifactId(artifactId)) {
+                        artifactId = manifest.getMainAttributes().getValue("Bundle-SymbolicName");
+                    }
+                    if (!isValidArtifactId(artifactId) && artifactId != null && artifactIdPattern.matcher(artifactId).matches()) {
+                        String importPackage = manifest.getMainAttributes().getValue("Import-Package");
+                        if (importPackage != null) {
+                            artifactId = String.format("%s.%s", importPackage.split(";")[0], artifactId);
+                        }
+                    }
+
+                    if (!isValidArtifactId(artifactId)) {
+                        artifactId = manifest.getMainAttributes().getValue("Automatic-Module-Name");
+                    }
+
+                    if (!isValidArtifactId(artifactId)) {
+                        artifactId = manifest.getMainAttributes().getValue("Implementation-Vendor-Id");
+                    }
+                    if (!isValidArtifactId(artifactId)) {
+                        artifactId = manifest.getMainAttributes().getValue("Implementation-Title");
+                        if (artifactId != null) {
+                            artifactId = artifactId.contains(";") ? artifactId.split(";")[0] : artifactId;
+                            artifactId = artifactId.replace("#", ".");
+                        }
+                    }
+
+                    if (!isValidArtifactId(artifactId)) {
+                        // 从 entries 中搜索
+                        artifactId = manifest.getEntries().values().stream().filter(
+                                value -> isValidArtifactId(value.getValue("Implementation-Title"))
+                        ).map(value -> value.getValue("Implementation-Title")).findFirst().orElse(null);
+                    }
+                }
+                if (isValidArtifactId(artifactId)) {
+                    fileArtifactIdMap.put(file, artifactId);
+                } else {
+                    if (System.getProperty("log.print", "false").equals("true")) {
+                        System.out.println("[-] artifactId is not valid: " + artifactId + ", " + file);
+                    }
+                    missArtifactIdFiles.add(file);
+                }
             }
-            if (pkgName != null && !pkgNamePattern.matcher(pkgName).matches()) {
-                fileArtifactMap.put(file, pkgName);
-            }
-        }
 
         /*
           1 .存在 groupId.artifactId 与 packageName 不一致的情况(已解决)
@@ -168,35 +213,40 @@ public class DependencyUtil {
           6. 存在 jar 中不包含 pom.xml 文件的情况
 
          */
-        if (packageName.get() == null) {
-            List<String> groups = new ArrayList<>();
-            jarFile.stream().filter(f -> {
-                String name = f.getName().replace("/", ".");
-                // 排除特例：log4j-api-2.13.2.jar!/META-INF/versions/9/module-info.class
-                return !name.contains("META-INF.") && name.endsWith(".class") &&
-                        groups.stream().noneMatch(name::startsWith) &&
-                        new File(f.getName()).getParentFile() != null;
-            }).forEach(f -> {
-                String path = new File(f.getName()).getParentFile().getPath().replace("/", ".");
-                Optional<String> result = groups.stream().map(group -> {
-                    String prefix = StringUtils.getCommonPrefix(group, path);
-                    // prefix 不会返回 null，返回 ""
-                    if (prefix.isEmpty()) {
-                        return path;
-                    } else if (prefix.split("\\.").length > minCommonPrefixLen) {
-                        return prefix;
+            if (packageName.get() == null) {
+                List<String> groups = new ArrayList<>();
+                jarFile.stream().filter(f -> {
+                    String name = x(f.getName());
+                    // 排除特例：log4j-api-2.13.2.jar!/META-INF/versions/9/module-info.class
+                    return !name.contains("META-INF.") && name.endsWith(".class") &&
+                            groups.stream().noneMatch(name::startsWith) &&
+                            new File(f.getName()).getParentFile() != null;
+                }).forEach(f -> {
+                    String path = x(new File(f.getName()).getParentFile().getPath());
+                    Optional<String> result = groups.stream().map(group -> {
+                        String prefix = StringUtils.getCommonPrefix(group, path);
+                        // prefix 不会返回 null，返回 ""
+                        if (prefix.isEmpty()) {
+                            return path;
+                        } else if (prefix.split("\\.").length > minCommonPrefixLen) {
+                            return prefix;
+                        }
+                        return null;
+                    }).filter(Objects::nonNull).findFirst();
+                    if (result.isPresent()) {
+                        groups.removeAll(groups.stream().filter(group -> group.startsWith(result.get())).toList());
+                        groups.add(result.get());
+                    } else {
+                        groups.add(path);
                     }
-                    return null;
-                }).filter(Objects::nonNull).findFirst();
-                if (result.isPresent()) {
-                    groups.removeAll(groups.stream().filter(group -> group.startsWith(result.get())).toList());
-                    groups.add(result.get());
-                } else {
-                    groups.add(path);
-                }
-            });
-            groups.forEach(pkgName -> addPkgFileMap(pkgName.replace("/", "."), file));
+                });
+                groups.forEach(pkgName -> addPkgFileMap(x(pkgName), file));
+            }
         }
+    }
+
+    private static boolean isValidArtifactId(String artifactId) {
+        return artifactId != null && artifactId.contains(".") && artifactIdPattern.matcher(artifactId).matches();
     }
 
     // 根据 pkgName 获取所在的文件，应返回最长匹配结果，返回集合的原因在于存在同前缀的情况
@@ -221,83 +271,49 @@ public class DependencyUtil {
         return fileList;
     }
 
-    /**
-     * 获取类所在的 Jar 包文件路径
-     *
-     * @param cName 查询的类名: a.b.c
-     * @return jar 包文件路径 or null
-     */
-    public static String getFilePathByFullQualifiedName(String cName) {
-        if (pkgNameFileMap.isEmpty()) {
-            throw new UnsupportedOperationException("[-] pkgNameFileMap is empty");
-        }
-        if (loadPathFailedClasses.contains(cName)) {
-            return null;
-        }
-        /*
-          不可采用 pkgName 代替 className 减少搜索次数
-          例外：两个 jar 包 x, y 同时存在 a.b.c pkgName，但是类只存在于 y 中，可能先缓存了 a.b.c -> x
-          将可能导致通过 clsNameFileMap 返回的 jar 包并不包含该 类 的情况
-         */
-        String filePath = clsNameFileMap.get(cName);
-        if (filePath == null) {
-            Optional<String> result = pkgNameFileMap.entrySet().stream().filter(
-                    entry -> cName.startsWith(entry.getKey())
-            ).map(entry -> entry.getValue().stream().filter(dir -> {
-                        try {
-                            return new JarFile(dir).stream().anyMatch(f -> {
-                                String name = f.getName();
-                                return name.endsWith(".class") && name.substring(0, name.lastIndexOf(".class")).replace("/", ".").equals(cName);
-                            });
-                        } catch (IOException e) {
-                            throw new RuntimeException(e);
-                        }
-                    }).findFirst().orElse(null)
-            ).filter(Objects::nonNull).findFirst();
-            if (result.isPresent()) {
-                filePath = result.get();
-                clsNameFileMap.put(cName, filePath);
-            }
-        }
-        // load from jdk
-        if (filePath == null) {
+    public static String getJarPathFromCache(String cName) {
+        return clsNameFileMap.get(cName);
+    }
+
+    private static String getJarPathByClassName(String cName) {
+        String filePath = null;
+        if (!loadPathFailedClasses.contains(cName)) {
             try {
-                Class.forName(cName);
+                Class.forName(cName, false, ClassLoader.getSystemClassLoader().getParent());
                 filePath = ClassNodeUtil.jdkFileName;
-                clsNameFileMap.put(cName, filePath);
             } catch (ClassNotFoundException ignored) {
+                filePath = DependencyUtil.getFilesByPkgName(cName).stream().filter(path -> {
+                    try (URLClassLoader urlClassLoader = new URLClassLoader(new URL[]{new File(path).toURI().toURL()})) {
+                        return urlClassLoader.getResourceAsStream(y(cName) + ".class") != null;
+                    } catch (Exception e) {
+                        System.out.println("xxx: " + path + ", " + cName);
+                        return false;
+                    }
+                }).findFirst().orElse(null);
+                if (filePath == null) {
+                    if (System.getProperty("log.print", "false").equals("true")) {
+                        System.out.println("[-] can not get file by class name: " + cName);
+                    }
+                    loadPathFailedClasses.add(cName);
+                }
             }
-        }
-        if (filePath == null) {
-            System.out.println("[-] can not get file by class name: " + cName);
-            loadPathFailedClasses.add(cName);
         }
         return filePath;
     }
 
-    // 获取 callee 对应的 父类/接口
-    public static String getCallOwner(String callee) {
+
+    // 获取 callee 对应的接口
+    public static String getCalleeOwnerInterfaceName(String callee) {
+        String[] callItems = callee.split("#");
+        if (!MethodUtil.isValidMethod(callItems[1])) {
+            return null;
+        }
         if (callOwnerCache.containsKey(callee)) {
             String owner = callOwnerCache.get(callee);
             return owner.isEmpty() ? null : owner;
         }
-        String[] callItems = callee.split("#");
-        Map<Object, ClassNode> loadedClassNodeMap = new ConcurrentHashMap<>();
-
-        String callOwner = HierarchyUtil.getMatchClzName(callItems[0], callItems[1], callItems[2], loadedClassNodeMap);
-        if (callOwner != null) {
-            // 如果实现的为 JDK 的接口则不进行回溯，如 java.lang.Runnable#run 会造成大量回溯结构
-            try {
-                Class.forName(callOwner);
-                if (System.getProperty("log.print", "false").equals("true")) {
-                    System.out.printf("[!] JDK Interface Skip %s#%s#%s, From: %s%n", callOwner, callItems[1], callItems[2], callee);
-                }
-                callOwner = null;
-            } catch (ClassNotFoundException ignored) {
-            }
-            // callOwnerCache value 无法设置 null
-            callOwnerCache.put(callee, callOwner == null ? "" : callOwner);
-        }
+        String callOwner = HierarchyUtil.getMatchSuperName(callItems[0], callItems[1], callItems[2], true);
+        callOwnerCache.put(callee, callOwner == null ? "" : callOwner);
         return callOwner;
     }
 
@@ -308,25 +324,23 @@ public class DependencyUtil {
         int fAccess = Integer.parseInt(callItems[3]);
         boolean isPublic = (fAccess & Opcodes.ACC_PUBLIC) != 0;
 
-        String jarPath = getFilePathByFullQualifiedName(callItems[0]);
+        String jarPath = getJarPathFromCache(callItems[0]);
         Set<String> retSet = new HashSet<>();
-        if (jarPath == null) {
-            return retSet;
-        }
-        if (isPublic) {
-            if (isJDK(jarPath)) {
-                retSet.addAll(getAllDependencies());
+        if (jarPath != null) {
+            if (isPublic) {
+                if (isJDK(jarPath)) {
+                    retSet.addAll(getAllDependencies());
+                } else {
+                    retSet.addAll(relatedDependencies(jarPath, false));
+                    retSet.addAll(missPomFiles);
+                }
             } else {
-                retSet.addAll(unCertainFiles);
-                retSet.addAll(relatedDependencies(jarPath, false));
+                retSet.add(jarPath);
             }
-        } else {
-            retSet.add(jarPath);
-        }
-        retSet.removeAll(loadFailedJarFiles);
-        // 过滤 jdk 回溯
-        if (System.getProperty("jdk.scan", "false").equals("false") && jdkFilePath != null) {
-            retSet.remove(jdkFilePath);
+            retSet.removeAll(loadFailedJarFiles);
+            if (System.getProperty("jdk.scan", "false").equals("false") && jdkFilePath != null) {
+                retSet.remove(jdkFilePath);
+            }
         }
         return retSet;
     }
@@ -338,54 +352,65 @@ public class DependencyUtil {
     // 待扫描的 lib 应只存在于 unCertainFiles 或 fileArtifactMap 中
     private static Set<String> getAllDependencies() {
         Set<String> retSet = new HashSet<>();
-        retSet.addAll(unCertainFiles);
-        retSet.addAll(fileArtifactMap.keySet());
+        retSet.addAll(missArtifactIdFiles);
+        retSet.addAll(fileArtifactIdMap.keySet());
         return retSet;
     }
 
     // 递归获取所有相关依赖，down: true 表示向下搜索所有所需的依赖项，false 表示向上搜索依赖当前 Jar 包的依赖项
     private static Set<String> relatedDependencies(String jarPath, boolean isDown) {
+        if (relatedDependenciesCache.containsKey(jarPath)) {
+            return relatedDependenciesCache.get(jarPath);
+        }
         Set<String> results = new HashSet<>();
         collect(jarPath, isDown, results);
+        relatedDependenciesCache.put(jarPath, results);
         return results;
     }
 
     private static void collect(String jarPath, boolean isDown, Set<String> loaded) {
         if (!loaded.contains(jarPath)) {
-            Set<String> result;
+            Set<String> result = new HashSet<>();
             loaded.add(jarPath);
             if (isDown) {
                 // 先获取 jar 依赖的 pkgName，再根据 pkgName 获取对应的 Jar，递归获取所有相关依赖
-                result = fileArtifactIdGroupMap.get(jarPath).stream().map(DependencyUtil::getFilesByPkgName).flatMap(Collection::stream).collect(Collectors.toSet());
+                result.addAll(fileArtifactIdGroupMap.get(jarPath).stream().map(DependencyUtil::getFilesByPkgName).flatMap(Collection::stream).collect(Collectors.toSet()));
             } else {
                 // 先获取 jar 的 artifactId，再获取依赖该 artifactId 的依赖项文件，递归获取所有相关依赖
-                result = artifactIdGroupFileMap.get(fileArtifactMap.get(jarPath));
-                if (result == null) {
-                    if (System.getProperty("log.print", "false").equals("true")) {
-                        System.out.println("[-] can not get file by artifactId: " + fileArtifactMap.get(jarPath));
+                String artifactId = fileArtifactIdMap.get(jarPath);
+                Set<String> files = artifactId != null ? artifactIdGroupFileMap.get(artifactId) : null;
+                // artifactId 正确且正确获取对其依赖 jar 包
+                if (files != null) {
+                    result.addAll(files);
+                } else {
+                    if (artifactId == null || missPomFiles.contains(jarPath)) {
+                        filePkgNameMap.get(jarPath).forEach(pkgName -> artifactIdGroupFileMap.keySet().stream().filter(
+                                id -> id.startsWith(pkgName)
+                        ).flatMap(id -> artifactIdGroupFileMap.get(id).stream()).forEach(result::add));
                     }
-                    return;
                 }
             }
-            Set<String> copyResult = new HashSet<>(result);
-            copyResult.removeAll(loaded);
-            copyResult.forEach(f -> collect(f, isDown, loaded));
+            if (!result.isEmpty()) {
+                Set<String> copyResult = new HashSet<>(result);
+                copyResult.removeAll(loaded);
+                copyResult.forEach(f -> collect(f, isDown, loaded));
+            }
         }
     }
 
     private static void addPkgFileMap(String pkgName, String file) {
-        List<String> list = pkgNameFileMap.computeIfAbsent(pkgName, k -> new ArrayList<>());
-        list.add(file);
+        filePkgNameMap.computeIfAbsent(file, k -> new HashSet<>()).add(pkgName);
+        pkgNameFileMap.computeIfAbsent(pkgName, k -> new HashSet<>()).add(file);
     }
 
     public static void printSize() {
         System.out.println("pkgNameFileMap size: " + sum(pkgNameFileMap));
         System.out.println("dependencyFileMap size: " + sum(artifactIdGroupFileMap));
         System.out.println("fileDependencyMap size: " + sum(fileArtifactIdGroupMap));
-        System.out.println("unCertainFiles size: " + unCertainFiles.size());
+        System.out.println("unCertainFiles size: " + missArtifactIdFiles.size());
         System.out.println("loadFailedJarFiles size: " + loadFailedJarFiles.size());
         System.out.println("callOwnerCache size: " + callOwnerCache.size());
-        System.out.println("clsNameFileMap size: " + clsNameFileMap.size());
+        System.out.println("clsNameFileMap size: " + clsNameFileMap.estimatedSize());
     }
 
     private static int sum(Map map) {
